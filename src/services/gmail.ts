@@ -7,15 +7,15 @@ import { templateData } from '../config/template';
 const transporter = nodemailer.createTransport({
     host: config.EMAIL_HOST,
     port: config.EMAIL_PORT,
-    secure: true,
-    requireTLS: false,
+    secure: false,
+    // requireTLS: false,
     auth: {
         user: config.EMAIL_USER,
         pass: config.EMAIL_PASS
     },
-    tls: {
-        rejectUnauthorized: false
-    }
+    // tls: {
+    //     rejectUnauthorized: false
+    // }
 });
 
 

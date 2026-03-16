@@ -19,15 +19,15 @@ const template_1 = require("../config/template");
 const transporter = nodemailer.createTransport({
     host: configSetup_1.default.EMAIL_HOST,
     port: configSetup_1.default.EMAIL_PORT,
-    secure: true,
-    requireTLS: false,
+    secure: false,
+    // requireTLS: false,
     auth: {
         user: configSetup_1.default.EMAIL_USER,
         pass: configSetup_1.default.EMAIL_PASS
     },
-    tls: {
-        rejectUnauthorized: false
-    }
+    // tls: {
+    //     rejectUnauthorized: false
+    // }
 });
 function sendEmail(to, subject, text, username) {
     return __awaiter(this, void 0, void 0, function* () {
