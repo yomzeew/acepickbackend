@@ -1,4 +1,3 @@
-"use strict";
 // import { createClient } from 'redis';
 // import config from '../config/configSetup';
 // const client = createClient({ url: config.REDIS_INSTANCE_URL });

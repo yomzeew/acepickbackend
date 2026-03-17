@@ -28,9 +28,9 @@ export const isAuthorized = async (req: Request, res: Response, next: NextFuncti
         let verified: any = verify(token, config.TOKEN_SECRET);
         if (!verified) return handleResponse(res, 401, false, `Unauthorized request`);
         if (verified.admin === true) {
-            req.admin = verified;
+            (req as any).admin = verified;
         } else {
-            req.user = verified;
+            (req as any).user = verified;
         }
 
         next();
@@ -49,7 +49,7 @@ export const socketAuthorize = async (socket: Socket, next: (err?: ExtendedError
 
     try {
         const decoded = verify(token, config.TOKEN_SECRET);
-        socket.user = decoded;
+        (socket as any).user = decoded;
 
         next();
     } catch (error) {

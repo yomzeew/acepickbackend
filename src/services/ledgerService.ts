@@ -1,17 +1,26 @@
-import { LedgerEntry } from "../models/LegderEntry";
+import prisma from "../config/prisma";
 import { Accounts, TransactionType } from "../utils/enum";
 
 type LedgerSide = {
-    transactionId: number;
+    transactionId: number | bigint;
     userId?: string | null;
     account: Accounts;
     type: TransactionType;
-    amount: number;
+    amount: number | { toNumber?: () => number };
     category?: string | null;
 };
 
 export class LedgerService {
     static async createEntry(entries: LedgerSide[]) {
-        const newEntries = await LedgerEntry.bulkCreate(entries)
+        await prisma.ledgerEntry.createMany({
+            data: entries.map(entry => ({
+                transactionId: Number(entry.transactionId),
+                userId: entry.userId ?? null,
+                account: entry.account as any,
+                type: entry.type as any,
+                amount: Number(entry.amount),
+                category: (entry.category ?? null) as any,
+            }))
+        })
     }
 }

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { commissionSchema, updateCommissionSchema } from "../../validation/body";
-import { Commission } from "../../models/Commison";
+import prisma from "../../config/prisma";
 import { errorResponse, handleResponse, successResponse } from "../../utils/modules";
 
 export const createCommission = async (req: Request, res: Response) => {
@@ -11,7 +11,7 @@ export const createCommission = async (req: Request, res: Response) => {
             return res.status(400).json({ message: result.error.issues[0].message });
         }
 
-        const newCommission = await Commission.create(result.data);
+        const newCommission = await prisma.commission.create({ data: result.data as any });
 
         return successResponse(res, 'success', newCommission);
     } catch (error) {
@@ -22,7 +22,7 @@ export const createCommission = async (req: Request, res: Response) => {
 
 export const getCommissions = async (req: Request, res: Response) => {
     try {
-        const commission = await Commission.findAll();
+        const commission = await prisma.commission.findMany();
 
         return successResponse(res, 'success', commission);
     } catch (error) {
@@ -35,7 +35,7 @@ export const getCommissionById = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
 
-        const commission = await Commission.findByPk(id);
+        const commission = await prisma.commission.findUnique({ where: { id: Number(id) } });
 
         return successResponse(res, 'success', commission);
     } catch (error) {
@@ -54,15 +54,13 @@ export const updateCommission = async (req: Request, res: Response) => {
             return errorResponse(res, 'error', result.error.issues[0].message);
         }
 
-        const updated = await Commission.update(result.data, {
-            where: {
-                id
-            }
-        })
+        const existing = await prisma.commission.findUnique({ where: { id: Number(id) } });
 
-        if (updated[0] === 0) {
+        if (!existing) {
             return errorResponse(res, 'error', 'No commission found');
         }
+
+        await prisma.commission.update({ where: { id: Number(id) }, data: result.data as any });
 
         return successResponse(res, 'success', 'Commission updated successfully');
     } catch (error) {
@@ -75,15 +73,13 @@ export const deleteCommission = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
 
-        const deleted = await Commission.destroy({
-            where: {
-                id
-            }
-        })
+        const existing = await prisma.commission.findUnique({ where: { id: Number(id) } });
 
-        if (deleted === 0) {
+        if (!existing) {
             return errorResponse(res, 'error', 'No commission found');
         }
+
+        await prisma.commission.delete({ where: { id: Number(id) } });
 
         return successResponse(res, 'success', 'Commission deleted successfully');
     } catch (error) {
@@ -96,17 +92,18 @@ export const toggleCommission = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
 
-        const commission = await Commission.findByPk(id);
+        const commission = await prisma.commission.findUnique({ where: { id: Number(id) } });
 
         if (!commission) {
             return handleResponse(res, 404, false, 'No commission found')
         }
 
-        commission.active = !commission.active;
+        const updated = await prisma.commission.update({
+            where: { id: Number(id) },
+            data: { active: !commission.active }
+        });
 
-        await commission.save();
-
-        return successResponse(res, 'success', { active: commission.active });
+        return successResponse(res, 'success', { active: updated.active });
     } catch (error) {
         console.log(error);
         return errorResponse(res, 'error', 'An error occurred')

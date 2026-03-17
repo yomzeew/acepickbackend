@@ -8,10 +8,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteReview = exports.editReview = exports.giveReview = void 0;
 const body_1 = require("../validation/body");
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const enum_1 = require("../utils/enum");
 const modules_1 = require("../utils/modules");
 const zod_1 = require("zod");
@@ -30,20 +33,15 @@ const giveReview = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         let job;
         let order;
         if (jobId) {
-            const existingReview = yield Models_1.Review.findOne({
-                where: {
-                    jobId,
-                    clientUserId: id
-                }
+            const existingReview = yield prisma_1.default.review.findFirst({
+                where: { jobId, clientUserId: id }
             });
             if (existingReview) {
                 return (0, modules_1.handleResponse)(res, 400, false, 'You have already reviewed this job');
             }
-            job = yield Models_1.Job.findByPk(jobId, {
-                include: [{
-                        model: Models_1.User,
-                        as: "professional"
-                    }]
+            job = yield prisma_1.default.job.findUnique({
+                where: { id: jobId },
+                include: { professional: true }
             });
             if (!job) {
                 return (0, modules_1.handleResponse)(res, 404, false, "Job not found");
@@ -57,22 +55,18 @@ const giveReview = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             user = job.professional;
         }
         if (orderId) {
-            const existingReview = yield Models_1.Review.findOne({
-                where: {
-                    orderId,
-                    clientUserId: id
-                }
+            const existingReview = yield prisma_1.default.review.findFirst({
+                where: { orderId, clientUserId: id }
             });
             if (existingReview) {
                 return (0, modules_1.handleResponse)(res, 400, false, 'You have already reviewed this order');
             }
-            order = yield Models_1.Order.findByPk(orderId, {
-                include: [{
-                        model: Models_1.User,
-                        as: "rider"
-                    }, {
-                        model: Models_1.ProductTransaction
-                    }]
+            order = yield prisma_1.default.order.findUnique({
+                where: { id: orderId },
+                include: {
+                    rider: true,
+                    productTransaction: true
+                }
             });
             if (!order) {
                 return (0, modules_1.handleResponse)(res, 404, false, "Order not found");
@@ -91,7 +85,9 @@ const giveReview = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!(user.role === enum_1.UserRole.PROFESSIONAL || user.role === enum_1.UserRole.DELIVERY)) {
             return (0, modules_1.handleResponse)(res, 400, false, "User is neither a professional nor delivery");
         }
-        const reviewObj = yield Models_1.Review.create(Object.assign(Object.assign({ text: review, professionalUserId: user.id, clientUserId: id }, (user.role === enum_1.UserRole.DELIVERY ? { orderId } : {})), (user.role === enum_1.UserRole.PROFESSIONAL ? { jobId } : {})));
+        const reviewObj = yield prisma_1.default.review.create({
+            data: Object.assign(Object.assign({ text: review, professionalUserId: user.id, clientUserId: id }, (user.role === enum_1.UserRole.DELIVERY ? { orderId } : {})), (user.role === enum_1.UserRole.PROFESSIONAL ? { jobId } : {}))
+        });
         return (0, modules_1.successResponse)(res, 'success', { reviewObj });
     }
     catch (error) {
@@ -114,16 +110,18 @@ const editReview = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             });
         }
         const { review } = result.data;
-        const reviewObj = yield Models_1.Review.findByPk(reviewId);
+        const reviewObj = yield prisma_1.default.review.findUnique({ where: { id: BigInt(reviewId) } });
         if (!reviewObj) {
             return (0, modules_1.errorResponse)(res, 'error', "Review not found");
         }
         if (reviewObj.clientUserId !== id) {
             return (0, modules_1.errorResponse)(res, 'error', "You are not authorized to edit this review");
         }
-        reviewObj.text = review;
-        yield reviewObj.save();
-        return (0, modules_1.successResponse)(res, 'success', { reviewObj });
+        const updated = yield prisma_1.default.review.update({
+            where: { id: BigInt(reviewId) },
+            data: { text: review }
+        });
+        return (0, modules_1.successResponse)(res, 'success', { reviewObj: updated });
     }
     catch (error) {
         console.log(error);
@@ -135,14 +133,14 @@ const deleteReview = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     try {
         const { reviewId } = req.params;
         const { id } = req.user;
-        const reviewObj = yield Models_1.Review.findByPk(reviewId);
+        const reviewObj = yield prisma_1.default.review.findUnique({ where: { id: BigInt(reviewId) } });
         if (!reviewObj) {
             return (0, modules_1.errorResponse)(res, 'error', "Review not found");
         }
         if (reviewObj.clientUserId !== id) {
             return (0, modules_1.errorResponse)(res, 'error', "You are not authorized to delete this review");
         }
-        yield reviewObj.destroy();
+        yield prisma_1.default.review.delete({ where: { id: BigInt(reviewId) } });
         return (0, modules_1.successResponse)(res, 'success', { message: "Review deleted successfully" });
     }
     catch (error) {

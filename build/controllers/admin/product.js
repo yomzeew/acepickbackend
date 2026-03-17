@@ -8,12 +8,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deliveryOversight = exports.marketOversight = exports.rejectProducts = exports.approveProducts = exports.getProducts = void 0;
 const query_1 = require("../../validation/query");
 const modules_1 = require("../../utils/modules");
-const sequelize_1 = require("sequelize");
-const Models_1 = require("../../models/Models");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const notification_1 = require("../../services/notification");
 const messages_1 = require("../../utils/messages");
 const gmail_1 = require("../../services/gmail");
@@ -29,32 +31,43 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
     const { approved, categoryId, category, search, state, lga, locationId, page, limit, orderBy, orderDir } = result.data;
     try {
-        const data = yield Models_1.Product.findAndCountAll({
-            where: Object.assign(Object.assign(Object.assign(Object.assign({}, (approved !== undefined && { approved })), (categoryId && { categoryId })), (search && { name: { [sequelize_1.Op.like]: `%${search}%` } })), (locationId && { locationId })),
-            limit: limit,
-            offset: (page - 1) * limit,
-            include: [
-                {
-                    model: Models_1.Category,
-                    attributes: ['id', 'name', 'description'],
-                    where: Object.assign({}, (category && { name: { [sequelize_1.Op.like]: `%${category}%` } }))
+        const where = {};
+        if (approved !== undefined)
+            where.approved = approved;
+        if (categoryId)
+            where.categoryId = categoryId;
+        if (search)
+            where.name = { contains: search };
+        if (locationId)
+            where.locationId = locationId;
+        const categoryWhere = {};
+        if (category)
+            categoryWhere.name = { contains: category };
+        const locationWhere = {};
+        if (state)
+            locationWhere.state = { contains: state };
+        if (lga)
+            locationWhere.lga = { contains: lga };
+        const [products, count] = yield Promise.all([
+            prisma_1.default.product.findMany({
+                where: Object.assign(Object.assign({}, where), { category: Object.keys(categoryWhere).length ? categoryWhere : undefined, pickupLocation: Object.keys(locationWhere).length ? locationWhere : undefined }),
+                take: limit,
+                skip: (page - 1) * limit,
+                include: {
+                    category: { select: { id: true, name: true, description: true } },
+                    pickupLocation: true,
                 },
-                {
-                    model: Models_1.Location,
-                    where: Object.assign(Object.assign({}, (state && { state: { [sequelize_1.Op.like]: `%${state}%` } })), (lga && { lga: { [sequelize_1.Op.like]: `%${lga}%` } }))
-                    //attributes: ['id', 'name', 'description'],
-                },
-            ],
-            order: [[orderBy || 'createdAt', orderDir || 'DESC']]
-        });
-        return (0, modules_1.successResponse)(res, 'success', {
-            products: data.rows.map((product) => {
-                const plainProduct = product.toJSON();
-                return Object.assign(Object.assign({}, plainProduct), { images: JSON.parse(plainProduct.images || '[]') });
+                orderBy: { [orderBy || 'createdAt']: (orderDir || 'desc').toLowerCase() }
             }),
-            page: page,
-            limit: limit,
-            total: data.count
+            prisma_1.default.product.count({
+                where: Object.assign(Object.assign({}, where), { category: Object.keys(categoryWhere).length ? categoryWhere : undefined, pickupLocation: Object.keys(locationWhere).length ? locationWhere : undefined })
+            })
+        ]);
+        return (0, modules_1.successResponse)(res, 'success', {
+            products: products.map((product) => (Object.assign(Object.assign({}, product), { images: typeof product.images === 'string' ? JSON.parse(product.images || '[]') : product.images }))),
+            page,
+            limit,
+            total: count
         });
     }
     catch (error) {
@@ -66,13 +79,9 @@ exports.getProducts = getProducts;
 const approveProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const product = yield Models_1.Product.findByPk(req.params.productId, {
-            include: [
-                {
-                    model: Models_1.User,
-                    include: [Models_1.Profile]
-                }
-            ]
+        const product = yield prisma_1.default.product.findUnique({
+            where: { id: Number(req.params.productId) },
+            include: { user: { include: { profile: true } } }
         });
         if (!product) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Product not found');
@@ -80,14 +89,17 @@ const approveProducts = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (product.approved) {
             return (0, modules_1.handleResponse)(res, 400, false, 'Product already approved');
         }
-        product.approved = true;
-        yield product.save();
-        const prod = product.toJSON();
+        yield prisma_1.default.product.update({ where: { id: product.id }, data: { approved: true } });
+        const prod = product;
         const email = (0, messages_1.approveProductEmail)(prod);
-        const { success, error } = yield (0, gmail_1.sendEmail)(prod.user.email, email.title, email.body, prod.user.profile.firstName);
-        if ((_a = prod.user) === null || _a === void 0 ? void 0 : _a.fcmToken) {
-            yield (0, notification_1.sendPushNotification)(prod.user.fcmToken, 'Product approved', `Your product - ${prod.name} has been approved by admin`, {});
-        }
+        const { success } = yield (0, gmail_1.sendEmail)(prod.user.email, email.title, email.body, (_a = prod.user.profile) === null || _a === void 0 ? void 0 : _a.firstName);
+        yield notification_1.NotificationService.create({
+            userId: prod.userId,
+            type: enum_1.NotificationType.SYSTEM,
+            title: 'Product Approved',
+            message: `Your product "${prod.name}" has been approved by admin`,
+            data: { productId: prod.id },
+        });
         return (0, modules_1.successResponse)(res, 'success', { message: 'Product approved successfully', emailSentStatus: success });
     }
     catch (error) {
@@ -99,13 +111,9 @@ exports.approveProducts = approveProducts;
 const rejectProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const product = yield Models_1.Product.findByPk(req.params.productId, {
-            include: [
-                {
-                    model: Models_1.User,
-                    include: [Models_1.Profile]
-                }
-            ]
+        const product = yield prisma_1.default.product.findUnique({
+            where: { id: Number(req.params.productId) },
+            include: { user: { include: { profile: true } } }
         });
         if (!product) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Product not found');
@@ -113,14 +121,17 @@ const rejectProducts = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (product.approved === false) {
             return (0, modules_1.handleResponse)(res, 400, false, 'Product already rejected');
         }
-        product.approved = false;
-        yield product.save();
-        const prod = product.toJSON();
+        yield prisma_1.default.product.update({ where: { id: product.id }, data: { approved: false } });
+        const prod = product;
         const email = (0, messages_1.rejectProductEmail)(prod);
-        const { success, error } = yield (0, gmail_1.sendEmail)(prod.user.email, email.title, email.body, prod.user.profile.firstName);
-        if ((_a = prod.user) === null || _a === void 0 ? void 0 : _a.fcmToken) {
-            yield (0, notification_1.sendPushNotification)(prod.user.fcmToken, 'Product rejected', `Your product - ${prod.name} has been rejected by admin`, {});
-        }
+        const { success } = yield (0, gmail_1.sendEmail)(prod.user.email, email.title, email.body, (_a = prod.user.profile) === null || _a === void 0 ? void 0 : _a.firstName);
+        yield notification_1.NotificationService.create({
+            userId: prod.userId,
+            type: enum_1.NotificationType.SYSTEM,
+            title: 'Product Rejected',
+            message: `Your product "${prod.name}" has been rejected by admin`,
+            data: { productId: prod.id },
+        });
         return (0, modules_1.successResponse)(res, 'success', { message: 'Product rejected successfully', emailSentStatus: success });
     }
     catch (error) {
@@ -131,12 +142,12 @@ const rejectProducts = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.rejectProducts = rejectProducts;
 const marketOversight = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const totalProducts = yield Models_1.Product.count();
-        const pendingProducts = yield Models_1.Product.count({ where: { approved: null } });
-        const approvedProducts = yield Models_1.Product.count({ where: { approved: true } });
-        const rejectedProducts = yield Models_1.Product.count({ where: { approved: false } });
-        const totalTransactions = yield Models_1.Transaction.count({ where: { status: enum_1.TransactionStatus.SUCCESS } });
-        const disputedProducts = yield Models_1.ProductTransaction.count({ where: { status: enum_1.ProductTransactionStatus.DISPUTED } });
+        const totalProducts = yield prisma_1.default.product.count();
+        const pendingProducts = yield prisma_1.default.product.count({ where: { approved: null } });
+        const approvedProducts = yield prisma_1.default.product.count({ where: { approved: true } });
+        const rejectedProducts = yield prisma_1.default.product.count({ where: { approved: false } });
+        const totalTransactions = yield prisma_1.default.transaction.count({ where: { status: enum_1.TransactionStatus.SUCCESS } });
+        const disputedProducts = yield prisma_1.default.productTransaction.count({ where: { status: enum_1.ProductTransactionStatus.DISPUTED } });
         return (0, modules_1.successResponse)(res, 'success', {
             totalProducts,
             approvedProducts,
@@ -153,12 +164,12 @@ const marketOversight = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.marketOversight = marketOversight;
 const deliveryOversight = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const totalDeliveries = yield Models_1.Order.count();
-        const unassignedDeliveries = yield Models_1.Order.count({ where: { status: enum_1.OrderStatus.PAID } });
-        const assignedDeliveries = yield Models_1.Order.count({ where: { status: enum_1.OrderStatus.ACCEPTED } });
-        const pickedUpDevliveries = yield Models_1.Order.count({ where: { status: enum_1.OrderStatus.CONFIRM_PICKUP } });
-        const completedDeliveries = yield Models_1.Order.count({ where: { status: enum_1.OrderStatus.CONFIRM_DELIVERY } });
-        const disputedDeliveries = yield Models_1.Order.count({ where: { status: enum_1.OrderStatus.DISPUTED } });
+        const totalDeliveries = yield prisma_1.default.order.count();
+        const unassignedDeliveries = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.PAID } });
+        const assignedDeliveries = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.ACCEPTED } });
+        const pickedUpDevliveries = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.CONFIRM_PICKUP } });
+        const completedDeliveries = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.CONFIRM_DELIVERY } });
+        const disputedDeliveries = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.DISPUTED } });
         return (0, modules_1.successResponse)(res, 'success', {
             totalDeliveries,
             unassignedDeliveries,

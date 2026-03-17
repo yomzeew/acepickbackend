@@ -8,21 +8,24 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteCertificate = exports.updateCertificate = exports.addCertificate = exports.getCertificates = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
 const body_1 = require("../validation/body");
 const getCertificates = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.user;
     try {
-        const profile = yield Models_1.Profile.findOne({ where: { userId: id } });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const certificates = yield Models_1.Certification.findAll({
+        const certificates = yield prisma_1.default.certification.findMany({
             where: { profileId: profile.id },
-            order: [['createdAt', 'DESC']],
+            orderBy: { createdAt: 'desc' },
         });
         return (0, modules_1.successResponse)(res, 'success', certificates);
     }
@@ -43,16 +46,18 @@ const addCertificate = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
     const { title, filePath, companyIssue, date } = result.data;
     try {
-        const profile = yield Models_1.Profile.findOne({ where: { userId: id } });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const certificate = yield Models_1.Certification.create({
-            title,
-            filePath,
-            companyIssue,
-            date,
-            profileId: profile.id
+        const certificate = yield prisma_1.default.certification.create({
+            data: {
+                title,
+                filePath,
+                companyIssue,
+                date,
+                profileId: profile.id
+            }
         });
         return (0, modules_1.successResponse)(res, 'success', certificate);
     }
@@ -76,10 +81,9 @@ const updateCertificate = (req, res) => __awaiter(void 0, void 0, void 0, functi
         });
     }
     try {
-        const updated = yield Models_1.Certification.update(result.data, {
-            where: {
-                id: id
-            }
+        const updated = yield prisma_1.default.certification.update({
+            where: { id: Number(id) },
+            data: result.data
         });
         return (0, modules_1.successResponse)(res, 'success', updated);
     }
@@ -94,8 +98,8 @@ const deleteCertificate = (req, res) => __awaiter(void 0, void 0, void 0, functi
         return (0, modules_1.handleResponse)(res, 400, false, 'Provide an id');
     }
     try {
-        yield Models_1.Certification.destroy({
-            where: { id }
+        yield prisma_1.default.certification.delete({
+            where: { id: Number(id) }
         });
         return (0, modules_1.successResponse)(res, 'success', { message: 'Certificate deleted successfully' });
     }

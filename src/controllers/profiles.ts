@@ -1,85 +1,75 @@
 import { Request, Response } from "express"
-import { Location, User, Profile, Cooperation, Professional, Education, Certification, Experience, Portfolio, Wallet, Rider, Profession, Sector, OnlineUser } from "../models/Models";
+import prisma from "../config/prisma";
 import { errorResponse, handleResponse, successResponse } from "../utils/modules";
-// import { PublishMessage } from "../events/handler";
-import { randomUUID } from "crypto";
-import axios from "axios";
-import config from '../config/configSetup'
 import { updateUserProfileSchema } from "../validation/body";
-import { UserRole } from "../utils/enum";
-import { Op } from "sequelize";
-import { Fn } from "sequelize/types/utils";
 import { getUsersQuerySchema } from "../validation/query";
 
-
+const fullProfileInclude = {
+    user: {
+        select: {
+            id: true,
+            email: true,
+            phone: true,
+            status: true,
+            role: true,
+            agreed: true,
+            createdAt: true,
+            updatedAt: true,
+            location: true,
+            wallet: {
+                select: {
+                    id: true,
+                    previousBalance: true,
+                    currentBalance: true,
+                    currency: true,
+                    status: true,
+                    userId: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    pin: true,
+                }
+            },
+            rider: true,
+        }
+    },
+    professional: {
+        include: {
+            profession: {
+                include: { sector: true }
+            }
+        }
+    },
+    cooperation: true,
+    education: true,
+    certifications: true,
+    experience: true,
+    portfolios: true,
+};
 
 export const MyAccountInfo = async (req: Request, res: Response) => {
     const { id } = req.user;
     try {
-        const profile = await Profile.findOne(
-            {
-                where: { userId: id },
-                attributes: {
-                    exclude: []
-                },
-                include: [
-                    {
-                        model: User,
-                        attributes: { exclude: ['password', 'fcmToken'] },
-                        include: [
-                            {
-                                model: Location,
-                                //attributes: ['country', 'state', 'city', 'address']
-                            },
-
-                            {
-                                model: Wallet,
-                                attributes: { exclude: ['pin'] }
-                            },
-                            {
-                                model: Rider
-                            }
-                        ]
-                    },
-                    {
-                        model: Professional,
-                        include: [{
-                            model: Profession,
-                            include: [Sector]
-                        }]
-                    },
-                    {
-                        model: Cooperation,
-                    },
-
-                    {
-                        model: Education
-                    },
-
-                    {
-                        model: Certification
-                    },
-
-                    {
-                        model: Experience
-                    },
-
-                    {
-                        model: Portfolio,
-                    }
-
-                ],
-
-            }
-        )
-
-
+        const profile = await prisma.profile.findFirst({
+            where: { userId: id },
+            include: fullProfileInclude,
+        })
 
         if (!profile) return errorResponse(res, "Failed", { status: false, message: "Profile Does'nt exist" })
 
-        profile.user.wallet.setDataValue('isActive', profile.user.wallet.pin !== null)
+        const walletPin = profile.user?.wallet?.pin;
+        const result = {
+            ...profile,
+            user: {
+                ...profile.user,
+                wallet: profile.user?.wallet ? {
+                    ...profile.user.wallet,
+                    pin: undefined,
+                    isActive: walletPin !== null
+                } : null
+            }
+        };
 
-        return successResponse(res, "Successful", profile)
+        return successResponse(res, "Successful", result)
     } catch (error: any) {
         return errorResponse(res, "Failed", { error: error?.message })
     }
@@ -89,72 +79,27 @@ export const MyAccountInfo = async (req: Request, res: Response) => {
 export const UserAccountInfo = async (req: Request, res: Response) => {
     const { userId } = req.params;
     try {
-        const profile = await Profile.findOne(
-            {
-                where: { userId: userId },
-                attributes: {
-                    exclude: []
-                },
-                include: [
-                    {
-                        model: User,
-                        attributes: { exclude: ['password', 'fcmToken'] },
-                        include: [
-                            {
-                                model: Location,
-                                //attributes: ['country', 'state', 'city', 'address']
-                            },
-
-                            {
-                                model: Wallet,
-                                attributes: {
-                                    exclude: ['pin']
-                                },
-                            },
-                            {
-                                model: Rider
-                            }
-
-                        ]
-                    },
-                    {
-                        model: Professional,
-                        include: [{
-                            model: Profession,
-                            include: [Sector]
-                        }]
-                    },
-                    {
-                        model: Cooperation,
-                    },
-
-                    {
-                        model: Education
-                    },
-
-                    {
-                        model: Certification
-                    },
-
-                    {
-                        model: Experience
-                    },
-
-                    {
-                        model: Portfolio,
-                    }
-                ],
-
-            }
-        )
-
-
+        const profile = await prisma.profile.findFirst({
+            where: { userId: userId },
+            include: fullProfileInclude,
+        })
 
         if (!profile) return errorResponse(res, "Failed", { status: false, message: "Profile Does'nt exist" })
 
-        profile.user.wallet.setDataValue('isActive', profile.user.wallet.pin !== null)
+        const walletPin = profile.user?.wallet?.pin;
+        const result = {
+            ...profile,
+            user: {
+                ...profile.user,
+                wallet: profile.user?.wallet ? {
+                    ...profile.user.wallet,
+                    pin: undefined,
+                    isActive: walletPin !== null
+                } : null
+            }
+        };
 
-        return successResponse(res, "Successful", profile)
+        return successResponse(res, "Successful", result)
     } catch (error) {
         return errorResponse(res, "Failed", error)
     }
@@ -180,26 +125,37 @@ export const updateProfile = async (req: Request, res: Response) => {
         // console.log(req.user);
 
         if (bio) {
-            const updated = await Profile.update(bio, {
-                where: { userId: id }
+            await prisma.profile.updateMany({
+                where: { userId: id },
+                data: bio
             });
         }
 
         if (contact) {
-            const updated = await User.update(contact, {
-                where: { id }
+            await prisma.user.update({
+                where: { id },
+                data: contact
             });
         }
 
         if (location) {
-            const updated = await Location.update(location, {
-                where: { userId: id }
-            });
+            const existingLocation = await prisma.location.findFirst({ where: { userId: id } });
+            if (existingLocation) {
+                await prisma.location.update({
+                    where: { id: existingLocation.id },
+                    data: location
+                });
+            } else {
+                await prisma.location.create({
+                    data: { ...location, userId: id }
+                });
+            }
         }
 
         return successResponse(res, "success", "Profile updated successfully");
-    } catch (error) {
-        return errorResponse(res, "Failed", error)
+    } catch (error: any) {
+        console.error("Profile update error:", error?.message || error);
+        return errorResponse(res, "Failed", error?.message || error)
     }
 }
 
@@ -222,45 +178,57 @@ export const getUsers = async (req: Request, res: Response) => {
 
 
     try {
-        const contacts = await User.findAll({
-            attributes: { exclude: ['password'] },
+        const contacts = await prisma.user.findMany({
             where: {
-                ...(role && { role }),
-                id: { [Op.ne]: id },
-            },
-            include: [
-                {
-                    model: Profile,
-                    where: search
-                        ? {
-                            [Op.or]: [
-                                { firstName: { [Op.like]: `%${search}%` } },
-                                { lastName: { [Op.like]: `%${search}%` } },
+                ...(role && { role: role as any }),
+                id: { not: id },
+                profile: search
+                    ? {
+                        OR: [
+                            { firstName: { contains: search, mode: 'insensitive' as const } },
+                            { lastName: { contains: search, mode: 'insensitive' as const } },
+                        ],
+                    }
+                    : undefined,
+                ...(professionId && {
+                    profile: {
+                        ...(search ? {
+                            OR: [
+                                { firstName: { contains: search, mode: 'insensitive' as const } },
+                                { lastName: { contains: search, mode: 'insensitive' as const } },
                             ],
-                        }
-                        : undefined,
-                    include: [
-                        {
-                            model: Professional,
-                            include: [
-                                {
-                                    model: Profession,
-                                    where: professionId ? { id: professionId } : undefined,
-                                },
-                            ],
+                        } : {}),
+                        professional: {
+                            professionId: Number(professionId),
                         },
-                    ],
+                    },
+                }),
+            },
+            select: {
+                id: true,
+                email: true,
+                phone: true,
+                status: true,
+                role: true,
+                agreed: true,
+                fcmToken: true,
+                createdAt: true,
+                updatedAt: true,
+                profile: {
+                    include: {
+                        professional: {
+                            include: {
+                                profession: true,
+                            },
+                        },
+                    },
                 },
-                {
-                    model: Location
-                },
-                {
-                    model: OnlineUser
-                }
-            ],
-            limit: limit,
-            offset: (page - 1) * limit,
-            order: [['createdAt', 'DESC']],
+                location: true,
+                onlineUser: true,
+            },
+            take: limit,
+            skip: (page - 1) * limit,
+            orderBy: { createdAt: 'desc' },
         });
 
 

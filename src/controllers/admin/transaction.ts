@@ -1,42 +1,24 @@
 import { Request, Response } from "express";
-import { Transaction } from "../../models/Models";
+import prisma from "../../config/prisma";
 import { TransactionStatus, TransactionType } from "../../utils/enum";
 import { errorResponse, successResponse } from "../../utils/modules";
 import { getTransactionSchema } from "../../validation/query";
 
 export const transactionStat = async (req: Request, res: Response) => {
     try {
-        const totalTransactions = await Transaction.count();
-        const successfulTransactions = await Transaction.count({
-            where: {
-                status: TransactionStatus.SUCCESS
-            }
+        const totalTransactions = await prisma.transaction.count();
+        const successfulTransactions = await prisma.transaction.count({ where: { status: TransactionStatus.SUCCESS as any } });
+        const failedTransactions = await prisma.transaction.count({ where: { status: TransactionStatus.FAILED as any } });
+        const pendingTransactions = await prisma.transaction.count({ where: { status: TransactionStatus.PENDING as any } });
+
+        const inboundAgg = await prisma.transaction.aggregate({
+            where: { type: TransactionType.CREDIT as any, status: TransactionStatus.SUCCESS as any },
+            _sum: { amount: true }
         });
 
-        const failedTransactions = await Transaction.count({
-            where: {
-                status: TransactionStatus.FAILED
-            }
-        });
-
-        const pendingTransactions = await Transaction.count({
-            where: {
-                status: TransactionStatus.PENDING
-            }
-        });
-
-        const inboundAmount = await Transaction.sum('amount', {
-            where: {
-                type: TransactionType.CREDIT,
-                status: TransactionStatus.SUCCESS
-            }
-        });
-
-        const outboundAmount = await Transaction.sum('amount', {
-            where: {
-                type: TransactionType.DEBIT,
-                status: TransactionStatus.SUCCESS
-            }
+        const outboundAgg = await prisma.transaction.aggregate({
+            where: { type: TransactionType.DEBIT as any, status: TransactionStatus.SUCCESS as any },
+            _sum: { amount: true }
         });
 
         return successResponse(res, 'success', {
@@ -44,8 +26,8 @@ export const transactionStat = async (req: Request, res: Response) => {
             successfulTransactions,
             failedTransactions,
             pendingTransactions,
-            inboundAmount,
-            outboundAmount
+            inboundAmount: inboundAgg._sum.amount ? Number(inboundAgg._sum.amount) : 0,
+            outboundAmount: outboundAgg._sum.amount ? Number(outboundAgg._sum.amount) : 0
         })
     } catch (error) {
         console.log(error);
@@ -66,11 +48,11 @@ export const getAllTransactions = async (req: Request, res: Response) => {
 
         const { status, page, limit } = result.data;
 
-        const transactions = await Transaction.findAll({
-            where: status && status !== 'all' ? { status } : {},
-            offset: (page - 1) * limit,
-            limit: limit,
-            order: [['createdAt', 'DESC']]
+        const transactions = await prisma.transaction.findMany({
+            where: status && status !== 'all' ? { status: status as any } : {},
+            skip: (page - 1) * limit,
+            take: limit,
+            orderBy: { createdAt: 'desc' }
         });
 
         return successResponse(res, 'success', { transactions });

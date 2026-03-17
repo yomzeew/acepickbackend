@@ -216,8 +216,18 @@ export const jobPostSchema = z.object({
     description: z.string().min(1, "Description is required"),
     address: z.string().min(1, "Address is required"),
     numOfJobs: z.number().int().positive("Number of jobs must be a positive integer").optional(),
-    professionalId: z.string().uuid("Professional ID must be a valid UUID"),
+    professionalId: z.union([z.string().uuid("Professional ID must be a valid UUID"), z.string().min(1)]),
     mode: z.nativeEnum(JobMode).optional(),
+    // Additional optional fields from frontend
+    categoryId: z.string().optional(),
+    startDate: z.string().datetime().optional(),
+    deadline: z.string().datetime().optional(),
+    budgetMin: z.number().positive("Minimum budget must be positive").optional(),
+    budgetMax: z.number().positive("Maximum budget must be positive").optional(),
+    priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+    state: z.string().optional(),
+    lga: z.string().optional(),
+    skillsRequired: z.array(z.string()).optional(),
 });
 
 export const jobUpdateSchema = z.object({
@@ -429,14 +439,16 @@ export const updateEducationSchema = z.object({
         }).optional(),
 
     gradDate: z
+        .coerce
         .date({ invalid_type_error: 'Graduation date must be a valid date' })
-        .optional(),
+        .optional()
+        .nullable(),
 
     isCurrent: z.boolean().optional(),
 }).refine(
     (data) => {
-        // If gradDate is provided, isCurrent must not be true
-        if (data.gradDate !== undefined) {
+        // If gradDate is provided (not null/undefined), isCurrent must not be true
+        if (data.gradDate) {
             return data.isCurrent !== true;
         }
         return true;
@@ -645,7 +657,8 @@ export const createProductSchema = z.object({
         .array(
             z.string().min(1, 'Image path cannot be empty')
         )
-        .min(1, 'At least one image is required'),
+        .optional()
+        .default([]),
 
     categoryId: z
         .number({
@@ -674,15 +687,20 @@ export const createProductSchema = z.object({
         .max(100, 'Discount cannot be more than 100%')
         .optional(),
 
-    userId: z
-        .string()
-        .uuid('User ID must be a valid UUID'),
+    weightPerUnit: z
+        .number()
+        .positive('Weight must be positive')
+        .optional(),
 
     locationId: z
         .number({
-            required_error: 'Location ID is required',
             invalid_type_error: 'Location ID must be a number',
-        }),
+        })
+        .optional(),
+
+    state: z.string().optional(),
+    lga: z.string().optional(),
+    address: z.string().optional(),
 });
 
 export const updateProductSchema = z.object({

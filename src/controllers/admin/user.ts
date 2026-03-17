@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
-import { User } from "../../models/User";
+import prisma from "../../config/prisma";
 import { UserRole, UserStatus } from "../../utils/enum";
-import { Profile } from "../../models/Profile";
 import { errorResponse, handleResponse, successResponse } from "../../utils/modules";
 import { reactivateUserEmail, suspendUserEmail } from "../../utils/messages";
 import { sendEmail } from "../../services/gmail";
@@ -21,23 +20,17 @@ export const getAllUsers = async (req: Request, res: Response) => {
         });
     }
 
-    // const modifiedRole = role.slice(0, -1);
-
     try {
-        const clients = await User.findAll({
-            where: {
-                role: role,
-            },
-            attributes: { exclude: ['password'] },
-            include: [
-                {
-                    model: Profile,
-                }
-            ],
-            order: [['createdAt', 'DESC']]
-        })
+        const clients = await prisma.user.findMany({
+            where: { role: role as any },
+            include: { profile: true },
+            orderBy: { createdAt: 'desc' }
+        });
 
-        return successResponse(res, 'success', clients)
+        // Exclude password from results
+        const sanitized = clients.map((u: any) => { u.password = null; return u; });
+
+        return successResponse(res, 'success', sanitized)
     } catch (error) {
         console.log(error)
         return errorResponse(res, 'error', 'Internal server error')
@@ -49,38 +42,35 @@ export const toggleSuspension = async (req: Request, res: Response) => {
     const { userId } = req.params;
 
     try {
-        const user = await User.findByPk(userId, { include: [Profile] });
+        const user = await prisma.user.findUnique({ where: { id: userId }, include: { profile: true } });
 
         if (!user) {
             return handleResponse(res, 404, false, 'User not found');
         }
 
         if (user.status === UserStatus.ACTIVE) {
-            user.status = UserStatus.SUSPENDED;
-            await user.save();
+            await prisma.user.update({ where: { id: userId }, data: { status: UserStatus.SUSPENDED as any } });
 
-            //send email to user
             const email = suspendUserEmail(user);
 
-            const response = await sendEmail(
+            await sendEmail(
                 user.email,
                 email.title,
                 email.body,
-                user.profile.firstName
+                user.profile?.firstName || 'User'
             )
 
             return successResponse(res, 'success', 'User suspended successfully')
         } else {
-            user.status = UserStatus.ACTIVE;
-            await user.save();
+            await prisma.user.update({ where: { id: userId }, data: { status: UserStatus.ACTIVE as any } });
 
             const email = reactivateUserEmail(user);
 
-            const response = await sendEmail(
+            await sendEmail(
                 user.email,
                 email.title,
                 email.body,
-                user.profile.firstName
+                user.profile?.firstName || 'User'
             )
 
             return successResponse(res, 'success', 'User reactivated successfully')
@@ -95,7 +85,7 @@ export const emailUser = async (req: Request, res: Response) => {
     const { userId, title, body } = req.body;
 
     try {
-        const user = await User.findByPk(userId, { include: [Profile] });
+        const user = await prisma.user.findUnique({ where: { id: userId }, include: { profile: true } });
 
         if (!user) {
             return handleResponse(res, 404, false, 'User not found')
@@ -105,7 +95,7 @@ export const emailUser = async (req: Request, res: Response) => {
             user.email,
             title,
             body,
-            user.profile.firstName
+            user.profile?.firstName || 'User'
         )
 
         if (success) {

@@ -8,26 +8,25 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteEducation = exports.updateEducation = exports.addEducation = exports.getEducation = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
 const body_1 = require("../validation/body");
 const getEducation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.user;
     console.log(req.user);
     try {
-        const profile = yield Models_1.Profile.findOne({
-            where: { userId: id }
-        });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const education = yield Models_1.Education.findAll({
-            where: {
-                profileId: profile.id
-            },
-            order: [['createdAt', 'DESC']]
+        const education = yield prisma_1.default.education.findMany({
+            where: { profileId: profile.id },
+            orderBy: { createdAt: 'desc' }
         });
         if (!education) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Education not found');
@@ -51,20 +50,20 @@ const addEducation = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
     const { school, degreeType, course, startDate, gradDate, isCurrent } = req.body;
     try {
-        const profile = yield Models_1.Profile.findOne({
-            where: { userId: id }
-        });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const education = yield Models_1.Education.create({
-            school,
-            degreeType,
-            course,
-            startDate,
-            gradDate,
-            isCurrent,
-            profileId: profile.id
+        const education = yield prisma_1.default.education.create({
+            data: {
+                school,
+                degreeType,
+                course,
+                startDate,
+                gradDate,
+                isCurrent,
+                profileId: profile.id
+            }
         });
         return (0, modules_1.successResponse)(res, 'success', education);
     }
@@ -88,10 +87,9 @@ const updateEducation = (req, res) => __awaiter(void 0, void 0, void 0, function
                 errors: result.error.flatten().fieldErrors,
             });
         }
-        const updated = yield Models_1.Education.update(result.data, {
-            where: {
-                id: id,
-            }
+        const updated = yield prisma_1.default.education.update({
+            where: { id: Number(id) },
+            data: result.data
         });
         return (0, modules_1.successResponse)(res, 'success', updated);
     }
@@ -107,10 +105,8 @@ const deleteEducation = (req, res) => __awaiter(void 0, void 0, void 0, function
         return (0, modules_1.handleResponse)(res, 400, false, 'Provide an id');
     }
     try {
-        const deleted = yield Models_1.Education.destroy({
-            where: {
-                id,
-            }
+        const deleted = yield prisma_1.default.education.delete({
+            where: { id: Number(id) }
         });
         return (0, modules_1.successResponse)(res, 'success', deleted);
     }

@@ -1,44 +1,22 @@
-import { Request, Response } from 'express';
-import { Location } from '../models/Models';
-import { storeLocationSchema, updateLocationSchema } from '../validation/body';
-import { errorResponse, successResponse } from '../utils/modules';
+import { Request, Response } from "express";
+import prisma from '../config/prisma';
+import { errorResponse, handleResponse, successResponse } from "../utils/modules";
 
-export const updateLocation = async (req: Request, res: Response) => {
+export const getLocationById = async (req: Request, res: Response) => {
+    const { id } = req.params;
+
     try {
-        const { locationId } = req.params;
-
-        if (!locationId || Number.isNaN(Number(locationId))) {
-            return res.status(400).json({
-                error: "Invalid or missing locationId parameter",
-            });
-        }
-
-        const result = updateLocationSchema.safeParse(req.body);
-
-        if (!result.success) {
-            return res.status(400).json({
-                error: "Invalid query parameters",
-                issues: result.error.format(),
-            });
-        }
-
-        const { latitude, longitude, address, lga, state, zipcode } = result.data;
-
-        const location = await Location.update({
-            latitude,
-            longitude,
-            address,
-            lga,
-            state,
-            zipcode
-        }, {
-            where: { id: locationId },
+        const location = await prisma.location.findUnique({
+            where: { id: Number(id) }
         });
 
-        return successResponse(res, 'Location updated successfully', location);
+        if (!location) {
+            return handleResponse(res, 404, false, 'Location not found')
+        }
+
+        return successResponse(res, 'success', location);
     } catch (error) {
-        console.error('Error updating location:', error);
-        return errorResponse(res, 'Error updating location', error);
+        return errorResponse(res, 'error', error)
     }
 }
 
@@ -46,28 +24,14 @@ export const getMyLocations = async (req: Request, res: Response) => {
     const { id } = req.user;
 
     try {
-        const location = await Location.findAll({
+        const locations = await prisma.location.findMany({
             where: { userId: id },
-            order: [['createdAt', 'DESC']]
+            orderBy: { createdAt: 'desc' }
         })
 
-        return successResponse(res, 'success', location);
+        return successResponse(res, 'success', locations);
     } catch (error) {
-        console.log(error)
-        return errorResponse(res, 'Error getting location', error);
-    }
-}
-
-export const getLocationById = async (req: Request, res: Response) => {
-    const { id } = req.params;
-
-    try {
-        const location = await Location.findByPk(id)
-
-        return successResponse(res, 'success', location);
-    } catch (error) {
-        console.log(error)
-        return errorResponse(res, 'Error getting location', error);
+        return errorResponse(res, 'error', error)
     }
 }
 
@@ -75,26 +39,18 @@ export const addLocation = async (req: Request, res: Response) => {
     const { id } = req.user;
 
     try {
+        const { latitude, longitude, address, lga, state, zipcode } = req.body;
 
-        const result = storeLocationSchema.safeParse(req.body);
-
-        if (!result.success) {
-            return res.status(400).json({
-                error: "Invalid query parameters",
-                issues: result.error.format(),
-            });
-        }
-
-        const { latitude, longitude, address, lga, state, zipcode } = result.data;
-
-        const location = await Location.create({
-            latitude,
-            longitude,
-            address,
-            lga,
-            state,
-            zipcode,
-            userId: id
+        const location = await prisma.location.create({
+            data: {
+                latitude,
+                longitude,
+                address,
+                lga,
+                state,
+                zipcode,
+                userId: id
+            }
         })
 
         return successResponse(res, 'Location added successfully', location);
@@ -104,15 +60,49 @@ export const addLocation = async (req: Request, res: Response) => {
     }
 }
 
+export const updateLocation = async (req: Request, res: Response) => {
+    const { locationId } = req.params;
+    const { id } = req.user;
+
+    try {
+        const location = await prisma.location.findFirst({
+            where: { id: Number(locationId), userId: id }
+        });
+
+        if (!location) {
+            return handleResponse(res, 404, false, 'Location not found');
+        }
+
+        const { latitude, longitude, address, lga, state, zipcode } = req.body;
+
+        const updated = await prisma.location.update({
+            where: { id: Number(locationId) },
+            data: {
+                ...(latitude !== undefined && { latitude }),
+                ...(longitude !== undefined && { longitude }),
+                ...(address !== undefined && { address }),
+                ...(lga !== undefined && { lga }),
+                ...(state !== undefined && { state }),
+                ...(zipcode !== undefined && { zipcode }),
+            }
+        });
+
+        return successResponse(res, 'Location updated successfully', updated);
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'Error updating location', error);
+    }
+}
+
 export const deleteLocation = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     try {
-        const deleted = await Location.destroy({
-            where: { id }
+        await prisma.location.delete({
+            where: { id: Number(id) }
         })
 
-        return successResponse(res, 'Location deleted successfully', deleted);
+        return successResponse(res, 'Location deleted successfully', {});
     } catch (error) {
         console.log(error)
         return errorResponse(res, 'Error deleting location', error);

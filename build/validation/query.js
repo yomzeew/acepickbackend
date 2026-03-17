@@ -29,6 +29,8 @@ exports.getProductSchema = zod_1.z.object({
     state: zod_1.z.string().optional(),
     lga: zod_1.z.string().optional(),
     search: zod_1.z.string().optional(),
+    minPrice: zod_1.z.coerce.number().min(0).optional(),
+    maxPrice: zod_1.z.coerce.number().min(0).optional(),
     page: zod_1.z.coerce.number().min(1).default(1),
     limit: zod_1.z.coerce.number().min(1).default(10),
     orderBy: zod_1.z.enum(['createdAt', 'price', 'name']).optional(),

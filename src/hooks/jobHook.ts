@@ -1,145 +1,112 @@
-import { Job, Professional, Profile } from '../models/Models';
+import prisma from '../config/prisma';
 import { JobStatus } from '../utils/enum';
 
-export const registerJobHook = async () => {
-    Job.afterUpdate(async (job: Job, options: any) => {
-        if (job.changed('status')) {
-            // Update the profile of the client
-            const clientProfile = await Profile.findOne({
-                where: { userId: job.clientId },
-            })
-
-
-            if (clientProfile) {
-                clientProfile.totalJobs = await Job.count({ where: { clientId: job.clientId } });
-
-                clientProfile.totalJobsPending = await Job.count({ where: { clientId: job.clientId, status: JobStatus.PENDING } });
-
-                clientProfile.totalJobsOngoing = await Job.count({ where: { clientId: job.clientId, status: JobStatus.ONGOING } });
-
-                clientProfile.totalJobsDeclined = await Job.count({ where: { clientId: job.clientId, status: JobStatus.DECLINED } });
-
-                clientProfile.totalJobsCompleted = await Job.count({ where: { clientId: job.clientId, status: JobStatus.COMPLETED } });
-
-                clientProfile.totalJobsApproved = await Job.count({ where: { clientId: job.clientId, status: JobStatus.APPROVED } });
-
-                clientProfile.totalJobsCanceled = await Job.count({ where: { clientId: job.clientId, status: JobStatus.CANCELLED } });
-
-                clientProfile.totalDisputes = await Job.count({ where: { clientId: job.clientId, status: JobStatus.DISPUTED } });
-
-                // clientProfile.totalExpense = await Job.sum('workmanship', { where: { clientId: job.clientId } });
-
-                await clientProfile.save();
-            }
-
-
-            const professionalProfile = await Profile.findOne({
-                where: { userId: job.professionalId },
-                include: [Professional]
-            })
-
-            if (professionalProfile) {
-                professionalProfile.totalJobs = await Job.count({ where: { professionalId: job.professionalId } });
-
-                professionalProfile.totalJobsPending = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.PENDING } });
-
-                professionalProfile.totalJobsOngoing = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.ONGOING } });
-
-                professionalProfile.totalJobsDeclined = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.DECLINED } });
-
-                professionalProfile.totalJobsCompleted = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.COMPLETED } });
-
-                professionalProfile.totalJobsApproved = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.APPROVED } });
-
-                professionalProfile.totalJobsCanceled = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.CANCELLED } });
-
-                professionalProfile.totalDisputes = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.DISPUTED } });
-
-                await professionalProfile.save();
-
-
-                professionalProfile.professional.totalEarning = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.APPROVED } });
-
-                professionalProfile.professional.completedAmount = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.COMPLETED } });
-
-                professionalProfile.professional.pendingAmount = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.PENDING } });
-
-                professionalProfile.professional.rejectedAmount = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.DECLINED } });
-
-                //professionalProfile.professional.availableWithdrawalAmount = professionalProfile.professional.totalEarning - professionalProfile.professional.completedAmount;
-
-                await professionalProfile.professional.save();
-            }
-
-        }
-    });
-
-    Job.afterCreate(async (job: Job, options: any) => {
-        const clientProfile = await Profile.findOne({
-            where: { userId: job.clientId },
-        })
-
+/**
+ * Call this after a job status update to refresh client & professional profile stats.
+ */
+export const onJobStatusUpdate = async (job: { clientId: string; professionalId: string }) => {
+    try {
+        // Update client profile
+        const clientProfile = await prisma.profile.findFirst({ where: { userId: job.clientId } });
 
         if (clientProfile) {
-            clientProfile.totalJobs = await Job.count({ where: { clientId: job.clientId } });
-
-            clientProfile.totalJobsPending = await Job.count({ where: { clientId: job.clientId, status: JobStatus.PENDING } });
-
-            //clientProfile.totalJobsOngoing = await Job.count({ where: { clientId: job.clientId, status: JobStatus.ONGOING } });
-
-            //clientProfile.totalJobsDeclined = await Job.count({ where: { clientId: job.clientId, status: JobStatus.DECLINED } });
-
-            // clientProfile.totalJobsCompleted = await Job.count({ where: { clientId: job.clientId, status: JobStatus.COMPLETED } });
-
-            //clientProfile.totalJobsApproved = await Job.count({ where: { clientId: job.clientId, status: JobStatus.APPROVED } });
-
-            //clientProfile.totalJobsCanceled = await Job.count({ where: { clientId: job.clientId, status: JobStatus.CANCELLED } });
-
-            //clientProfile.totalDisputes = await Job.count({ where: { clientId: job.clientId, status: JobStatus.DISPUTED } });
-
-            // clientProfile.totalExpense = await Job.sum('workmanship', { where: { clientId: job.clientId } });
-
-            await clientProfile.save();
+            await prisma.profile.update({
+                where: { id: clientProfile.id },
+                data: {
+                    totalJobs: await prisma.job.count({ where: { clientId: job.clientId } }),
+                    totalJobsPending: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.PENDING as any } }),
+                    totalJobsOngoing: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.ONGOING as any } }),
+                    totalJobsDeclined: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.DECLINED as any } }),
+                    totalJobsCompleted: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.COMPLETED as any } }),
+                    totalJobsApproved: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.APPROVED as any } }),
+                    totalJobsCanceled: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.CANCELLED as any } }),
+                    totalDisputes: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.DISPUTED as any } }),
+                }
+            });
         }
 
-
-        const professionalProfile = await Profile.findOne({
-            where: { userId: job.professionalId },
-            include: [Professional]
-        })
+        // Update professional profile
+        const professionalProfile = await prisma.profile.findFirst({ where: { userId: job.professionalId } });
+        const professional = await prisma.professional.findFirst({ where: { profile: { userId: job.professionalId } } });
 
         if (professionalProfile) {
-            professionalProfile.totalJobs = await Job.count({ where: { professionalId: job.professionalId } });
-
-            professionalProfile.totalJobsPending = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.PENDING } });
-
-            // professionalProfile.totalJobsOngoing = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.ONGOING } });
-
-            // professionalProfile.totalJobsDeclined = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.DECLINED } });
-
-            // professionalProfile.totalJobsCompleted = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.COMPLETED } });
-
-            // professionalProfile.totalJobsApproved = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.APPROVED } });
-
-            // professionalProfile.totalJobsCanceled = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.CANCELLED } });
-
-            // professionalProfile.totalDisputes = await Job.count({ where: { professionalId: job.professionalId, status: JobStatus.DISPUTED } });
-
-            await professionalProfile.save();
-
-
-            //professionalProfile.professional.totalEarning = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.APPROVED } });
-
-            //professionalProfile.professional.completedAmount = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.COMPLETED } });
-
-            professionalProfile.professional.pendingAmount = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.PENDING } });
-
-            //professionalProfile.professional.rejectedAmount = await Job.sum('workmanship', { where: { professionalId: job.professionalId, status: JobStatus.DECLINED } });
-
-            //professionalProfile.professional.availableWithdrawalAmount = professionalProfile.professional.totalEarning - professionalProfile.professional.completedAmount;
-
-            await professionalProfile.professional.save();
+            await prisma.profile.update({
+                where: { id: professionalProfile.id },
+                data: {
+                    totalJobs: await prisma.job.count({ where: { professionalId: job.professionalId } }),
+                    totalJobsPending: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.PENDING as any } }),
+                    totalJobsOngoing: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.ONGOING as any } }),
+                    totalJobsDeclined: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.DECLINED as any } }),
+                    totalJobsCompleted: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.COMPLETED as any } }),
+                    totalJobsApproved: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.APPROVED as any } }),
+                    totalJobsCanceled: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.CANCELLED as any } }),
+                    totalDisputes: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.DISPUTED as any } }),
+                }
+            });
         }
 
-    })
+        if (professional) {
+            const approvedSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.APPROVED as any }, _sum: { workmanship: true } });
+            const completedSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.COMPLETED as any }, _sum: { workmanship: true } });
+            const pendingSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.PENDING as any }, _sum: { workmanship: true } });
+            const declinedSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.DECLINED as any }, _sum: { workmanship: true } });
+
+            await prisma.professional.update({
+                where: { id: professional.id },
+                data: {
+                    totalEarning: Number(approvedSum._sum.workmanship ?? 0),
+                    completedAmount: Number(completedSum._sum.workmanship ?? 0),
+                    pendingAmount: Number(pendingSum._sum.workmanship ?? 0),
+                    rejectedAmount: Number(declinedSum._sum.workmanship ?? 0),
+                }
+            });
+        }
+    } catch (error) {
+        console.log('jobHook error:', error);
+    }
+}
+
+/**
+ * Call this after a job creation to refresh client & professional profile stats.
+ */
+export const onJobCreate = async (job: { clientId: string; professionalId: string }) => {
+    try {
+        const clientProfile = await prisma.profile.findFirst({ where: { userId: job.clientId } });
+
+        if (clientProfile) {
+            await prisma.profile.update({
+                where: { id: clientProfile.id },
+                data: {
+                    totalJobs: await prisma.job.count({ where: { clientId: job.clientId } }),
+                    totalJobsPending: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.PENDING as any } }),
+                }
+            });
+        }
+
+        const professionalProfile = await prisma.profile.findFirst({ where: { userId: job.professionalId } });
+        const professional = await prisma.professional.findFirst({ where: { profile: { userId: job.professionalId } } });
+
+        if (professionalProfile) {
+            await prisma.profile.update({
+                where: { id: professionalProfile.id },
+                data: {
+                    totalJobs: await prisma.job.count({ where: { professionalId: job.professionalId } }),
+                    totalJobsPending: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.PENDING as any } }),
+                }
+            });
+        }
+
+        if (professional) {
+            const pendingSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.PENDING as any }, _sum: { workmanship: true } });
+
+            await prisma.professional.update({
+                where: { id: professional.id },
+                data: {
+                    pendingAmount: Number(pendingSum._sum.workmanship ?? 0),
+                }
+            });
+        }
+    } catch (error) {
+        console.log('jobHook error:', error);
+    }
 }

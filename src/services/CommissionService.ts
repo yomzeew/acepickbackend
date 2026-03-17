@@ -1,35 +1,29 @@
-import { Op } from "sequelize";
-import { Commission } from "../models/Commison";
+import prisma from "../config/prisma";
 import { CommissionType } from "../utils/enum";
 
 export class CommissionService {
     static async calculateCommission(amount: number, type: string) {
         try {
-            const commission = await Commission.findOne({
+            const now = new Date();
+
+            const commission = await prisma.commission.findFirst({
                 where: {
                     active: true,
-                    type: {
-                        [Op.in]: ['all', type],
-                    },
-                    [Op.and]: [
+                    type: { in: ['all', type] as any },
+                    OR: [
+                        { effectiveFrom: { lte: now } },
+                        { effectiveFrom: null },
+                    ],
+                    AND: [
                         {
-                            [Op.or]: [
-                                { effectiveFrom: { [Op.lte]: new Date() } },
-                                { effectiveFrom: null },
-                            ],
-                        },
-                        {
-                            [Op.or]: [
-                                { effectiveTo: { [Op.gte]: new Date() } },
+                            OR: [
+                                { effectiveTo: { gte: now } },
                                 { effectiveTo: null },
                             ],
                         },
                     ],
-                    minAmount: {
-                        [Op.lte]: amount,
-                    },
+                    minAmount: { lte: amount },
                 }
-
             })
 
             if (!commission) {
@@ -37,14 +31,13 @@ export class CommissionService {
             }
 
             if (commission.type === CommissionType.PERCENTAGE) {
-                return amount * commission.rate
+                return amount * Number(commission.rate)
             }
 
-            return commission.fixedAmount
+            return Number(commission.fixedAmount)
         } catch (error) {
             console.log(error)
             return 0
         }
-
     }
 }

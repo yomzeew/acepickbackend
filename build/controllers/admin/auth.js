@@ -8,24 +8,23 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAdmins = exports.removeAdmin = exports.upgradeUserToAdmin = void 0;
-const Models_1 = require("../../models/Models");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const modules_1 = require("../../utils/modules");
 const enum_1 = require("../../utils/enum");
 const upgradeUserToAdmin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { userId } = req.params;
     try {
-        // const user = await User.findByPk(userId);
-        // if (!adminRole)
-        //     return handleResponse(res, 404, false, "Admin role not found")
-        const user = yield Models_1.User.findByPk(userId);
+        const user = yield prisma_1.default.user.findUnique({ where: { id: userId } });
         if (!user)
             return (0, modules_1.handleResponse)(res, 404, false, "User not found");
         if (user.role === enum_1.UserRole.ADMIN)
             return (0, modules_1.handleResponse)(res, 400, false, "User is already an admin");
-        user.role = enum_1.UserRole.ADMIN;
-        yield user.save();
+        yield prisma_1.default.user.update({ where: { id: userId }, data: { role: enum_1.UserRole.ADMIN } });
         return (0, modules_1.successResponse)(res, 'success', 'User upgraded to admin');
     }
     catch (error) {
@@ -37,13 +36,12 @@ exports.upgradeUserToAdmin = upgradeUserToAdmin;
 const removeAdmin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { userId } = req.params;
     try {
-        const user = yield Models_1.User.findByPk(userId);
+        const user = yield prisma_1.default.user.findUnique({ where: { id: userId } });
         if (!user)
             return (0, modules_1.handleResponse)(res, 404, false, "User not found");
         if (user.role !== enum_1.UserRole.ADMIN)
             return (0, modules_1.handleResponse)(res, 400, false, "User is not an admin");
-        user.role = enum_1.UserRole.CLIENT;
-        yield user.save();
+        yield prisma_1.default.user.update({ where: { id: userId }, data: { role: enum_1.UserRole.CLIENT } });
         return (0, modules_1.successResponse)(res, 'success', 'User removed from admin status');
     }
     catch (error) {
@@ -54,9 +52,9 @@ const removeAdmin = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.removeAdmin = removeAdmin;
 const getAdmins = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const admins = yield Models_1.User.findAll({
+        const admins = yield prisma_1.default.user.findMany({
             where: { role: enum_1.UserRole.ADMIN },
-            include: [Models_1.Profile]
+            include: { profile: true }
         });
         return (0, modules_1.successResponse)(res, 'success', admins);
     }

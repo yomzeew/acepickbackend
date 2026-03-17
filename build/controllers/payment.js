@@ -13,18 +13,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.verifyTransfer = exports.handlePaystackWebhook = exports.finalizeTransfer = exports.initiateTransfer = exports.verifyPayment = exports.initiatePayment = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
+const library_1 = require("@prisma/client/runtime/library");
 const modules_1 = require("../utils/modules");
 const configSetup_1 = __importDefault(require("../config/configSetup"));
 const axios_1 = __importDefault(require("axios"));
 const enum_1 = require("../utils/enum");
 const notification_1 = require("../services/notification");
+const enum_2 = require("../utils/enum");
 const body_1 = require("../validation/body");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const chat_1 = require("../chat");
 const events_1 = require("../utils/events");
 const messages_1 = require("../utils/messages");
 const gmail_1 = require("../services/gmail");
+const order_1 = require("./order");
 const ledgerService_1 = require("../services/ledgerService");
 const initiatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f;
@@ -42,29 +45,21 @@ const initiatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function
         let expectedAmount;
         switch (description.toLowerCase()) {
             case "job payment": {
-                const job = yield Models_1.Job.findOne({
-                    where: {
-                        id: jobId
-                    }
-                });
+                const job = yield prisma_1.default.job.findUnique({ where: { id: jobId } });
                 expectedAmount = Number((_a = job === null || job === void 0 ? void 0 : job.workmanship) !== null && _a !== void 0 ? _a : 0) + Number((_b = job === null || job === void 0 ? void 0 : job.materialsCost) !== null && _b !== void 0 ? _b : 0);
                 break;
             }
             case "product payment": {
-                const productTrans = yield Models_1.ProductTransaction.findOne({
-                    where: {
-                        id: productTransactionId
-                    }
+                const productTrans = yield prisma_1.default.productTransaction.findUnique({
+                    where: { id: productTransactionId }
                 });
                 expectedAmount = Number((_c = productTrans === null || productTrans === void 0 ? void 0 : productTrans.price) !== null && _c !== void 0 ? _c : 0);
                 break;
             }
             case "product_order payment": {
-                const productOrderTrans = yield Models_1.ProductTransaction.findOne({
-                    where: {
-                        id: productTransactionId
-                    },
-                    include: [Models_1.Order]
+                const productOrderTrans = yield prisma_1.default.productTransaction.findUnique({
+                    where: { id: productTransactionId },
+                    include: { order: true }
                 });
                 expectedAmount = Number((_d = productOrderTrans === null || productOrderTrans === void 0 ? void 0 : productOrderTrans.price) !== null && _d !== void 0 ? _d : 0)
                     + Number((_f = (_e = productOrderTrans === null || productOrderTrans === void 0 ? void 0 : productOrderTrans.order) === null || _e === void 0 ? void 0 : _e.cost) !== null && _f !== void 0 ? _f : 0);
@@ -89,17 +84,19 @@ const initiatePayment = (req, res) => __awaiter(void 0, void 0, void 0, function
             },
         });
         const data = paystackResponseInit.data.data;
-        const transaction = yield Models_1.Transaction.create({
-            userId: id,
-            amount: amount,
-            reference: data.reference,
-            status: enum_1.TransactionStatus.PENDING,
-            currency: data.currency,
-            timestamp: new Date(),
-            description: description.toLowerCase(),
-            jobId: description.toString().includes('job') ? jobId : null,
-            productTransactionId: description.toString().includes('product') ? productTransactionId : null,
-            type: description.toLowerCase() === enum_1.TransactionDescription.WALLET_TOPUP ? enum_1.TransactionType.CREDIT : enum_1.TransactionType.DEBIT,
+        yield prisma_1.default.transaction.create({
+            data: {
+                userId: id,
+                amount: amount,
+                reference: data.reference,
+                status: enum_1.TransactionStatus.PENDING,
+                currency: data.currency,
+                timestamp: new Date(),
+                description: description.toLowerCase(),
+                jobId: description.toString().includes('job') ? jobId : null,
+                productTransactionId: description.toString().includes('product') ? productTransactionId : null,
+                type: description.toLowerCase() === enum_1.TransactionDescription.WALLET_TOPUP ? enum_1.TransactionType.CREDIT : enum_1.TransactionType.DEBIT,
+            }
         });
         return (0, modules_1.successResponse)(res, 'success', data);
     }
@@ -119,17 +116,7 @@ const verifyPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         });
         const { data } = paystackResponse.data;
         if (data.status === enum_1.TransactionStatus.SUCCESS) {
-            // if (created) {
-            //     const wallet = await Wallet.findOne({ where: { userId: id } })
-            //     if (wallet) {
-            //         let prevAmount = Number(wallet.currentBalance);
-            //         let newAmount = Number(transaction.amount);
-            //         wallet.previousBalance = prevAmount;
-            //         wallet.currentBalance = prevAmount + newAmount;
-            //         await wallet.save()
-            //     }
-            // }
-            // return handleResponse(res, 200, true, "Payment sucessfully verified", { result: paystackResponse.data })
+            // Verification handled by webhook
         }
         return (0, modules_1.handleResponse)(res, 200, true, "Payment sucessfully verified", { result: paystackResponse.data });
     }
@@ -149,7 +136,7 @@ const initiateTransfer = (req, res) => __awaiter(void 0, void 0, void 0, functio
         });
     }
     const { amount, recipientCode, pin, reason } = result.data;
-    const wallet = yield Models_1.Wallet.findOne({ where: { userId: id } });
+    const wallet = yield prisma_1.default.wallet.findFirst({ where: { userId: id } });
     if (!wallet) {
         return (0, modules_1.errorResponse)(res, 'error', 'Wallet not found');
     }
@@ -159,29 +146,33 @@ const initiateTransfer = (req, res) => __awaiter(void 0, void 0, void 0, functio
     if (!bcryptjs_1.default.compareSync(pin, wallet.pin)) {
         return (0, modules_1.handleResponse)(res, 403, false, 'Invalid PIN');
     }
-    if (amount > wallet.currentBalance) {
+    if (amount > Number(wallet.currentBalance)) {
         return (0, modules_1.handleResponse)(res, 403, false, 'Insufficient balance');
     }
     const reference = (0, modules_1.randomId)(12);
-    const transfer = yield Models_1.Transfer.create({
-        userId: id,
-        amount,
-        recipientCode,
-        reference,
-        reason,
-        timestamp: new Date(),
+    const transfer = yield prisma_1.default.transfer.create({
+        data: {
+            userId: id,
+            amount,
+            recipientCode,
+            reference,
+            reason,
+            timestamp: new Date(),
+        }
     });
-    const transaction = yield Models_1.Transaction.create({
-        userId: id,
-        amount: amount,
-        reference: transfer.reference,
-        status: enum_1.TransactionStatus.PENDING,
-        currency: 'NGN',
-        timestamp: new Date(),
-        description: 'wallet withdrawal',
-        jobId: null,
-        productTransactionId: null,
-        type: enum_1.TransactionType.DEBIT,
+    yield prisma_1.default.transaction.create({
+        data: {
+            userId: id,
+            amount: amount,
+            reference: transfer.reference,
+            status: enum_1.TransactionStatus.PENDING,
+            currency: 'NGN',
+            timestamp: new Date(),
+            description: 'wallet withdrawal',
+            jobId: null,
+            productTransactionId: null,
+            type: enum_1.TransactionType.DEBIT,
+        }
     });
     const response = yield axios_1.default.post('https://api.paystack.co/transfer', {
         source: 'balance',
@@ -213,16 +204,16 @@ const finalizeTransfer = (req, res) => __awaiter(void 0, void 0, void 0, functio
 });
 exports.finalizeTransfer = finalizeTransfer;
 const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
     const payload = req.body;
     console.log("webhook called");
     console.log(payload.event);
     try {
         if (payload.event.includes('transfer')) {
-            const transfer = yield Models_1.Transfer.findOne({
+            const transfer = yield prisma_1.default.transfer.findFirst({
                 where: { reference: payload.data.reference }
             });
-            const transaction = yield Models_1.Transaction.findOne({
+            const transaction = yield prisma_1.default.transaction.findFirst({
                 where: { reference: payload.data.reference }
             });
             if (!transfer) {
@@ -231,22 +222,32 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
             if (!transaction) {
                 return res.status(200).send('Transaction not found');
             }
-            const user = yield Models_1.User.findOne({
+            const user = yield prisma_1.default.user.findUnique({
                 where: { id: transfer.userId },
-                include: [Models_1.OnlineUser, Models_1.Wallet]
+                include: { onlineUser: true, wallet: true }
             });
             if (!user) {
                 return res.status(200).send('User not found');
             }
             switch (payload.event) {
                 case 'transfer.success':
-                    transfer.status = enum_1.TransferStatus.SUCCESS;
-                    yield transfer.save();
-                    transaction.status = enum_1.TransactionStatus.SUCCESS;
-                    yield transaction.save();
-                    user.wallet.previousBalance = user.wallet.currentBalance;
-                    user.wallet.currentBalance -= transfer.amount;
-                    yield user.wallet.save();
+                    yield prisma_1.default.transfer.update({
+                        where: { id: transfer.id },
+                        data: { status: enum_1.TransferStatus.SUCCESS }
+                    });
+                    yield prisma_1.default.transaction.update({
+                        where: { id: transaction.id },
+                        data: { status: enum_1.TransactionStatus.SUCCESS }
+                    });
+                    if (user.wallet) {
+                        yield prisma_1.default.wallet.update({
+                            where: { id: user.wallet.id },
+                            data: {
+                                previousBalance: user.wallet.currentBalance,
+                                currentBalance: new library_1.Decimal(user.wallet.currentBalance).sub(new library_1.Decimal(transfer.amount))
+                            }
+                        });
+                    }
                     yield ledgerService_1.LedgerService.createEntry([
                         {
                             transactionId: transaction.id,
@@ -263,15 +264,35 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
                             account: enum_1.Accounts.PAYMENT_GATEWAY
                         }
                     ]);
-                    (0, notification_1.sendPushNotification)(user.fcmToken, `Transfer Success`, `Your transfer of ${transfer.amount} was successful`, {});
+                    yield notification_1.NotificationService.create({
+                        userId: user.id,
+                        type: enum_2.NotificationType.PAYMENT,
+                        title: 'Transfer Successful',
+                        message: `Your transfer of ${transfer.amount} was successful`,
+                        data: { transferId: transfer.id },
+                    });
                     break;
                 case 'transfer.failed':
-                    transfer.status = enum_1.TransferStatus.FAILED;
-                    yield transfer.save();
-                    (0, notification_1.sendPushNotification)(user.fcmToken, `Transfer Failed`, `Your transfer of ${transfer.amount} failed`, {});
+                    yield prisma_1.default.transfer.update({
+                        where: { id: transfer.id },
+                        data: { status: enum_1.TransferStatus.FAILED }
+                    });
+                    yield notification_1.NotificationService.create({
+                        userId: user.id,
+                        type: enum_2.NotificationType.PAYMENT,
+                        title: 'Transfer Failed',
+                        message: `Your transfer of ${transfer.amount} failed`,
+                        data: { transferId: transfer.id },
+                    });
                     break;
                 case 'transfer.reversed':
-                    (0, notification_1.sendPushNotification)(user.fcmToken, `Transfer Reversed`, `Your transfer of ${transfer.amount} has been reversed`, {});
+                    yield notification_1.NotificationService.create({
+                        userId: user.id,
+                        type: enum_2.NotificationType.PAYMENT,
+                        title: 'Transfer Reversed',
+                        message: `Your transfer of ${transfer.amount} has been reversed`,
+                        data: { transferId: transfer.id },
+                    });
                     break;
                 default:
                     break;
@@ -280,15 +301,13 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
         }
         else if (payload.event.includes('charge.success')) {
             const { reference, status, channel, paid_at } = payload.data;
-            const transaction = yield Models_1.Transaction.findOne({
-                where: { reference: reference },
-                include: [
-                    {
-                        model: Models_1.User,
-                        as: 'user',
-                        include: [Models_1.OnlineUser, Models_1.Wallet]
+            const transaction = yield prisma_1.default.transaction.findFirst({
+                where: { reference },
+                include: {
+                    user: {
+                        include: { onlineUser: true, wallet: true }
                     }
-                ]
+                }
             });
             if (!transaction) {
                 return res.status(200).send('Transaction not found');
@@ -296,31 +315,32 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
             if (transaction.status === enum_1.TransactionStatus.SUCCESS) {
                 return res.status(200).send('Transaction already processed');
             }
-            transaction.status = status;
-            transaction.channel = channel;
-            transaction.timestamp = new Date(paid_at);
-            yield transaction.save();
+            yield prisma_1.default.transaction.update({
+                where: { id: transaction.id },
+                data: {
+                    status,
+                    channel,
+                    timestamp: new Date(paid_at),
+                }
+            });
             if (transaction.jobId
                 && (transaction.description === enum_1.TransactionDescription.JOB_PAYMENT)) {
-                const job = yield Models_1.Job.findByPk(transaction.jobId, {
-                    include: [
-                        {
-                            model: Models_1.User,
-                            as: 'professional',
-                            include: [Models_1.Profile]
-                        },
-                        {
-                            model: Models_1.User,
-                            as: 'client',
-                            include: [Models_1.Profile]
-                        }
-                    ]
+                const job = yield prisma_1.default.job.findUnique({
+                    where: { id: transaction.jobId },
+                    include: {
+                        professional: { include: { profile: true } },
+                        client: { include: { profile: true } }
+                    }
                 });
                 if (job) {
-                    job.status = enum_1.JobStatus.ONGOING;
-                    job.payStatus = enum_1.PayStatus.PAID;
-                    job.paymentRef = reference;
-                    yield job.save();
+                    yield prisma_1.default.job.update({
+                        where: { id: job.id },
+                        data: {
+                            status: enum_1.JobStatus.ONGOING,
+                            payStatus: enum_1.PayStatus.PAID,
+                            paymentRef: reference,
+                        }
+                    });
                     yield ledgerService_1.LedgerService.createEntry([
                         {
                             transactionId: transaction.id,
@@ -337,36 +357,37 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
                             account: enum_1.Accounts.PLATFORM_ESCROW
                         }
                     ]);
-                    (0, notification_1.sendPushNotification)(transaction.user.fcmToken, `Job Payment`, `Job titled: ${job === null || job === void 0 ? void 0 : job.title} has been paid by ${(_b = (_a = job === null || job === void 0 ? void 0 : job.client) === null || _a === void 0 ? void 0 : _a.profile) === null || _b === void 0 ? void 0 : _b.firstName} ${(_d = (_c = job === null || job === void 0 ? void 0 : job.client) === null || _c === void 0 ? void 0 : _c.profile) === null || _d === void 0 ? void 0 : _d.lastName}}`, {});
-                    const email = (0, messages_1.jobPaymentEmail)(job === null || job === void 0 ? void 0 : job.toJSON());
-                    const msgStat = yield (0, gmail_1.sendEmail)(job.dataValues.professional.email, email.title, email.body, job.dataValues.professional.profile.firstName + ' ' + job.dataValues.professional.profile.lastName);
+                    yield notification_1.NotificationService.create({
+                        userId: job.professionalId,
+                        type: enum_2.NotificationType.PAYMENT,
+                        title: 'Job Payment Received',
+                        message: `Job "${job === null || job === void 0 ? void 0 : job.title}" has been paid by ${(_b = (_a = job === null || job === void 0 ? void 0 : job.client) === null || _a === void 0 ? void 0 : _a.profile) === null || _b === void 0 ? void 0 : _b.firstName} ${(_d = (_c = job === null || job === void 0 ? void 0 : job.client) === null || _c === void 0 ? void 0 : _c.profile) === null || _d === void 0 ? void 0 : _d.lastName}`,
+                        data: { jobId: job.id },
+                    });
+                    const emailContent = (0, messages_1.jobPaymentEmail)(job);
+                    yield (0, gmail_1.sendEmail)(job.professional.email, emailContent.title, emailContent.body, job.professional.profile.firstName + ' ' + job.professional.profile.lastName);
                 }
             }
             if (transaction.productTransactionId
                 && (transaction.description === enum_1.TransactionDescription.PRODUCT_PAYMENT
                     || transaction.description === enum_1.TransactionDescription.PRODUCT_ORDER_PAYMENT)) {
-                const productTransaction = yield Models_1.ProductTransaction.findByPk(transaction.productTransactionId, {
-                    include: [
-                        {
-                            model: Models_1.User,
-                            as: 'buyer',
-                            include: [Models_1.Profile]
-                        },
-                        {
-                            model: Models_1.User,
-                            as: 'seller',
-                            include: [Models_1.Profile]
-                        },
-                        {
-                            model: Models_1.Product
-                        }
-                    ]
+                const productTransaction = yield prisma_1.default.productTransaction.findUnique({
+                    where: { id: transaction.productTransactionId },
+                    include: {
+                        buyer: { include: { profile: true } },
+                        seller: { include: { profile: true } },
+                        product: true
+                    }
                 });
                 if (productTransaction) {
-                    productTransaction.status = enum_1.ProductTransactionStatus.ORDERED;
-                    yield productTransaction.save();
-                    productTransaction.product.quantity -= productTransaction.quantity;
-                    yield productTransaction.product.save();
+                    yield prisma_1.default.productTransaction.update({
+                        where: { id: productTransaction.id },
+                        data: { status: enum_1.ProductTransactionStatus.ORDERED }
+                    });
+                    yield prisma_1.default.product.update({
+                        where: { id: productTransaction.product.id },
+                        data: { quantity: productTransaction.product.quantity - productTransaction.quantity }
+                    });
                     yield ledgerService_1.LedgerService.createEntry([
                         {
                             transactionId: transaction.id,
@@ -384,31 +405,85 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
                         }
                     ]);
                     //send notification to seller
-                    (0, notification_1.sendPushNotification)(transaction.user.fcmToken, `Product Payment`, `${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.quantity} of your product: ${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.product.name} has been paid by ${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.buyer.profile.firstName} ${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.buyer.profile.lastName}`, {});
+                    yield notification_1.NotificationService.create({
+                        userId: productTransaction.sellerId,
+                        type: enum_2.NotificationType.PAYMENT,
+                        title: 'Product Payment Received',
+                        message: `${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.quantity} of your product: ${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.product.name} has been paid by ${(_e = productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.buyer.profile) === null || _e === void 0 ? void 0 : _e.firstName} ${(_f = productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.buyer.profile) === null || _f === void 0 ? void 0 : _f.lastName}`,
+                        data: { productTransactionId: productTransaction.id },
+                    });
                     //send email to seller
-                    const email = (0, messages_1.productPaymentEmail)(productTransaction);
-                    const msgStat = yield (0, gmail_1.sendEmail)(productTransaction.seller.email, email.title, email.body, productTransaction.seller.profile.firstName + ' ' + productTransaction.seller.profile.lastName);
+                    const emailContent = (0, messages_1.productPaymentEmail)(productTransaction);
+                    yield (0, gmail_1.sendEmail)(productTransaction.seller.email, emailContent.title, emailContent.body, ((_g = productTransaction.seller.profile) === null || _g === void 0 ? void 0 : _g.firstName) + ' ' + ((_h = productTransaction.seller.profile) === null || _h === void 0 ? void 0 : _h.lastName));
+                    // Self-pickup: notify vendor that buyer will collect the item
+                    if (productTransaction.orderMethod === enum_1.OrderMethod.SELF_PICKUP) {
+                        yield notification_1.NotificationService.create({
+                            userId: productTransaction.sellerId,
+                            type: enum_2.NotificationType.ORDER,
+                            title: 'Self-Pickup Order',
+                            message: `${(_j = productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.buyer.profile) === null || _j === void 0 ? void 0 : _j.firstName} ${(_k = productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.buyer.profile) === null || _k === void 0 ? void 0 : _k.lastName} will self-pickup ${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.quantity}x ${productTransaction === null || productTransaction === void 0 ? void 0 : productTransaction.product.name}. Please prepare the item.`,
+                            data: { productTransactionId: productTransaction.id, orderMethod: 'self_pickup' },
+                        });
+                        try {
+                            (0, chat_1.getIO)().to(productTransaction.sellerId).emit(events_1.Emit.ORDER_STATUS_UPDATE, {
+                                data: {
+                                    productTransactionId: productTransaction.id,
+                                    status: 'self_pickup_paid',
+                                    orderMethod: 'self_pickup',
+                                    buyer: productTransaction.buyer,
+                                }
+                            });
+                        }
+                        catch (e) { /* socket may not be initialized */ }
+                    }
                 }
             }
             if (transaction.description === enum_1.TransactionDescription.PRODUCT_ORDER_PAYMENT) {
-                const order = yield Models_1.Order.findOne({
+                const order = yield prisma_1.default.order.findFirst({
                     where: {
                         productTransactionId: transaction.productTransactionId,
                         status: enum_1.OrderStatus.PENDING,
                     }
                 });
                 if (order) {
-                    order.status = enum_1.OrderStatus.PAID;
-                    yield order.save();
+                    yield prisma_1.default.order.update({
+                        where: { id: order.id },
+                        data: { status: enum_1.OrderStatus.PAID }
+                    });
+                    // Auto-notify nearby riders about the new delivery
+                    const orderWithDetails = yield prisma_1.default.order.findUnique({
+                        where: { id: order.id },
+                        include: {
+                            dropoffLocation: true,
+                            productTransaction: {
+                                include: {
+                                    product: { include: { pickupLocation: true } },
+                                    seller: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
+                                    buyer: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
+                                }
+                            }
+                        }
+                    });
+                    if (orderWithDetails) {
+                        const pickup = (_m = (_l = orderWithDetails.productTransaction) === null || _l === void 0 ? void 0 : _l.product) === null || _m === void 0 ? void 0 : _m.pickupLocation;
+                        const dropoff = orderWithDetails.dropoffLocation;
+                        if ((pickup === null || pickup === void 0 ? void 0 : pickup.latitude) && (pickup === null || pickup === void 0 ? void 0 : pickup.longitude) && (dropoff === null || dropoff === void 0 ? void 0 : dropoff.latitude) && (dropoff === null || dropoff === void 0 ? void 0 : dropoff.longitude)) {
+                            (0, order_1.notifyNearbyRiders)(orderWithDetails, Number(pickup.latitude), Number(pickup.longitude), Number(dropoff.latitude), Number(dropoff.longitude));
+                        }
+                    }
                 }
             }
             if (transaction.description === enum_1.TransactionDescription.WALLET_TOPUP) {
                 if (transaction.user.wallet) {
                     let prevAmount = Number(transaction.user.wallet.currentBalance);
                     let newAmount = Number(transaction.amount);
-                    transaction.user.wallet.previousBalance = prevAmount;
-                    transaction.user.wallet.currentBalance = prevAmount + newAmount;
-                    yield transaction.user.wallet.save();
+                    yield prisma_1.default.wallet.update({
+                        where: { id: transaction.user.wallet.id },
+                        data: {
+                            previousBalance: prevAmount,
+                            currentBalance: prevAmount + newAmount,
+                        }
+                    });
                     yield ledgerService_1.LedgerService.createEntry([
                         {
                             transactionId: transaction.id,
@@ -427,10 +502,16 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
                     ]);
                 }
             }
-            (0, notification_1.sendPushNotification)(transaction.user.fcmToken, `Payment Success`, `Your Payment of ${transaction.amount} was successful`, {});
+            yield notification_1.NotificationService.create({
+                userId: transaction.userId,
+                type: enum_2.NotificationType.PAYMENT,
+                title: 'Payment Successful',
+                message: `Your payment of ${transaction.amount} was successful`,
+                data: { transactionId: transaction.id },
+            });
             const io = (0, chat_1.getIO)();
-            if ((_e = transaction.user.onlineUser) === null || _e === void 0 ? void 0 : _e.isOnline) {
-                io.to((_f = transaction.user.onlineUser) === null || _f === void 0 ? void 0 : _f.socketId).emit(events_1.Emit.PAYMENT_SUCCESS, {
+            if ((_o = transaction.user.onlineUser) === null || _o === void 0 ? void 0 : _o.isOnline) {
+                io.to((_p = transaction.user.onlineUser) === null || _p === void 0 ? void 0 : _p.socketId).emit(events_1.Emit.PAYMENT_SUCCESS, {
                     text: 'Payment Success', data: {
                         id: transaction.id,
                         status: transaction.status,

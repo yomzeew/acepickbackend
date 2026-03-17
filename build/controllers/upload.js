@@ -8,75 +8,65 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uploadAvatar = exports.uploadFile = exports.uploadFiles = void 0;
 const modules_1 = require("../utils/modules");
-const uploadCloud_1 = require("../services/uploadCloud");
-const configSetup_1 = __importDefault(require("../config/configSetup"));
-const enum_1 = require("../utils/enum");
-// const BASE_FOLDER = 'uploads'
-var StorageContainer;
-(function (StorageContainer) {
-    StorageContainer["PROFILE"] = "profile";
-    StorageContainer["GENERAL"] = "general";
-})(StorageContainer || (StorageContainer = {}));
+const supabaseStorage_1 = require("../services/supabaseStorage");
+const supabase_1 = require("../config/supabase");
+/**
+ * Upload multiple files (e.g. product images) to Supabase Storage.
+ * Expects multer memory storage with req.files populated.
+ */
 const uploadFiles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    if (!req.files) {
-        return (0, modules_1.handleResponse)(res, 404, false, 'No files uploaded');
+    if (!req.files || req.files.length === 0) {
+        return (0, modules_1.handleResponse)(res, 400, false, 'No files uploaded');
     }
     const files = req.files;
-    // const filesModified = files.map((file) => {
-    //     return {
-    //         buffer: file.buffer,
-    //         name: Date.now().toString(),
-    //         mimetype: file.mimetype,
-    //     }
-    // })
     try {
-        const paths = files.map((file) => `${configSetup_1.default.ENV === enum_1.ENV.DEV ? configSetup_1.default.DEV_URL : configSetup_1.default.PROD_URL}/${file.path.slice(file.path.indexOf('uploads')).split('\\').join('/')}`);
-        return (0, modules_1.successResponse)(res, 'success', { urls: paths });
+        const urls = yield (0, supabaseStorage_1.uploadProductImagesToSupabase)(files);
+        return (0, modules_1.successResponse)(res, 'success', { urls });
     }
     catch (error) {
-        return (0, modules_1.handleResponse)(res, 500, false, 'Error uploading files');
+        console.error('Upload files error:', error.message);
+        return (0, modules_1.handleResponse)(res, 500, false, error.message || 'Error uploading files');
     }
 });
 exports.uploadFiles = uploadFiles;
+/**
+ * Upload a single generic file to Supabase Storage.
+ * Expects multer memory storage with req.file populated.
+ */
 const uploadFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.file) {
-        return (0, modules_1.handleResponse)(res, 404, false, 'No file uploaded');
+        return (0, modules_1.handleResponse)(res, 400, false, 'No file uploaded');
     }
     const file = req.file;
-    const fileModified = {
-        buffer: file.buffer,
-        name: Date.now().toString(),
-        mimetype: file.mimetype,
-    };
-    console.log('filename', fileModified.name);
     try {
-        const path = yield (0, uploadCloud_1.uploadFileToBlob)(StorageContainer.GENERAL, fileModified);
-        return (0, modules_1.successResponse)(res, 'success', { url: path });
+        const result = yield (0, supabaseStorage_1.uploadFileToSupabase)(supabase_1.BUCKET, file.buffer, file.originalname, file.mimetype, supabase_1.FOLDERS.GENERAL);
+        return (0, modules_1.successResponse)(res, 'success', { url: result.url });
     }
     catch (error) {
-        return (0, modules_1.handleResponse)(res, 500, false, 'Error uploading file');
+        console.error('Upload file error:', error.message);
+        return (0, modules_1.handleResponse)(res, 500, false, error.message || 'Error uploading file');
     }
 });
 exports.uploadFile = uploadFile;
+/**
+ * Upload an avatar to Supabase Storage.
+ * Expects multer memory storage with req.file populated (field: 'avatar').
+ */
 const uploadAvatar = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!req.file) {
-        return (0, modules_1.handleResponse)(res, 404, false, 'No file uploaded');
+        return (0, modules_1.handleResponse)(res, 400, false, 'No file uploaded');
     }
     const file = req.file;
     try {
-        // const path = await uploadFileToBlob(StorageContainer.PROFILE, fileModified)
-        return (0, modules_1.successResponse)(res, 'success', {
-            url: `${configSetup_1.default.ENV === enum_1.ENV.DEV ? configSetup_1.default.DEV_URL : configSetup_1.default.PROD_URL}/${file.path.slice(file.path.indexOf('uploads')).split('\\').join('/')}`
-        });
+        const url = yield (0, supabaseStorage_1.uploadAvatarToSupabase)(file);
+        return (0, modules_1.successResponse)(res, 'success', { url });
     }
     catch (error) {
-        return (0, modules_1.handleResponse)(res, 500, false, 'Error uploading file');
+        console.error('Upload avatar error:', error.message);
+        return (0, modules_1.handleResponse)(res, 500, false, error.message || 'Error uploading file');
     }
 });
 exports.uploadAvatar = uploadAvatar;

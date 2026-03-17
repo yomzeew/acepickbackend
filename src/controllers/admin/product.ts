@@ -2,12 +2,11 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { getProductSchema } from "../../validation/query";
 import { errorResponse, handleResponse, successResponse } from "../../utils/modules";
-import { Op } from "sequelize";
-import { Category, Product, Location, User, Profile, Transaction, Order, ProductTransaction } from "../../models/Models";
-import { sendPushNotification } from "../../services/notification";
+import prisma from "../../config/prisma";
+import { NotificationService } from "../../services/notification";
 import { approveProductEmail, rejectProductEmail } from "../../utils/messages";
 import { sendEmail } from "../../services/gmail";
-import { OrderStatus, ProductTransactionStatus, TransactionStatus } from "../../utils/enum";
+import { OrderStatus, ProductTransactionStatus, TransactionStatus, NotificationType } from "../../utils/enum";
 
 export const getProducts = async (req: Request, res: Response) => {
     const result = getProductSchema.safeParse(req.query);
@@ -22,50 +21,52 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const { approved, categoryId, category, search, state, lga, locationId, page, limit, orderBy, orderDir } = result.data;
 
-
     try {
-        const data = await Product.findAndCountAll({
-            where: {
-                ...(approved !== undefined && { approved }),
-                ...(categoryId && { categoryId }),
-                ...(search && { name: { [Op.like]: `%${search}%` } }),
-                ...(locationId && { locationId }),
-            },
-            limit: limit,
-            offset: (page - 1) * limit,
-            include: [
-                {
-                    model: Category,
-                    attributes: ['id', 'name', 'description'],
-                    where: {
-                        ...(category && { name: { [Op.like]: `%${category}%` } })
-                    }
-                },
-                {
-                    model: Location,
-                    where: {
-                        ...(state && { state: { [Op.like]: `%${state}%` } }),
-                        ...(lga && { lga: { [Op.like]: `%${lga}%` } }),
+        const where: any = {};
+        if (approved !== undefined) where.approved = approved;
+        if (categoryId) where.categoryId = categoryId;
+        if (search) where.name = { contains: search };
+        if (locationId) where.locationId = locationId;
 
-                    }
-                    //attributes: ['id', 'name', 'description'],
+        const categoryWhere: any = {};
+        if (category) categoryWhere.name = { contains: category };
+
+        const locationWhere: any = {};
+        if (state) locationWhere.state = { contains: state };
+        if (lga) locationWhere.lga = { contains: lga };
+
+        const [products, count] = await Promise.all([
+            prisma.product.findMany({
+                where: {
+                    ...where,
+                    category: Object.keys(categoryWhere).length ? categoryWhere : undefined,
+                    pickupLocation: Object.keys(locationWhere).length ? locationWhere : undefined,
                 },
-            ],
-            order: [[orderBy || 'createdAt', orderDir || 'DESC']]
-        })
+                take: limit,
+                skip: (page - 1) * limit,
+                include: {
+                    category: { select: { id: true, name: true, description: true } },
+                    pickupLocation: true,
+                },
+                orderBy: { [orderBy || 'createdAt']: (orderDir || 'desc').toLowerCase() as any }
+            }),
+            prisma.product.count({
+                where: {
+                    ...where,
+                    category: Object.keys(categoryWhere).length ? categoryWhere : undefined,
+                    pickupLocation: Object.keys(locationWhere).length ? locationWhere : undefined,
+                }
+            })
+        ]);
 
         return successResponse(res, 'success', {
-            products: data.rows.map((product: any) => {
-                const plainProduct = product.toJSON();
-                return {
-                    ...plainProduct,
-                    images: JSON.parse(plainProduct.images || '[]'),
-                };
-            }),
-
-            page: page,
-            limit: limit,
-            total: data.count
+            products: products.map((product: any) => ({
+                ...product,
+                images: typeof product.images === 'string' ? JSON.parse(product.images || '[]') : product.images,
+            })),
+            page,
+            limit,
+            total: count
         });
 
     } catch (error) {
@@ -76,18 +77,10 @@ export const getProducts = async (req: Request, res: Response) => {
 
 export const approveProducts = async (req: Request, res: Response) => {
     try {
-        const product = await Product.findByPk(
-            req.params.productId,
-            {
-                include: [
-                    {
-                        model: User,
-                        include: [Profile]
-                    }
-                ]
-            }
-        );
-
+        const product = await prisma.product.findUnique({
+            where: { id: Number(req.params.productId) },
+            include: { user: { include: { profile: true } } }
+        });
 
         if (!product) {
             return handleResponse(res, 404, false, 'Product not found')
@@ -97,29 +90,26 @@ export const approveProducts = async (req: Request, res: Response) => {
             return handleResponse(res, 400, false, 'Product already approved')
         }
 
-        product.approved = true;
+        await prisma.product.update({ where: { id: product.id }, data: { approved: true } });
 
-        await product.save();
-
-        const prod = product.toJSON();
+        const prod: any = product;
 
         const email = approveProductEmail(prod);
 
-        const { success, error } = await sendEmail(
+        const { success } = await sendEmail(
             prod.user.email,
             email.title,
             email.body,
-            prod.user.profile.firstName
+            prod.user.profile?.firstName
         )
 
-        if (prod.user?.fcmToken) {
-            await sendPushNotification(
-                prod.user.fcmToken,
-                'Product approved',
-                `Your product - ${prod.name} has been approved by admin`,
-                {}
-            );
-        }
+        await NotificationService.create({
+            userId: prod.userId,
+            type: NotificationType.SYSTEM,
+            title: 'Product Approved',
+            message: `Your product "${prod.name}" has been approved by admin`,
+            data: { productId: prod.id },
+        });
 
         return successResponse(res, 'success', { message: 'Product approved successfully', emailSentStatus: success });
     } catch (error) {
@@ -131,18 +121,10 @@ export const approveProducts = async (req: Request, res: Response) => {
 
 export const rejectProducts = async (req: Request, res: Response) => {
     try {
-        const product = await Product.findByPk(
-            req.params.productId,
-            {
-                include: [
-                    {
-                        model: User,
-                        include: [Profile]
-                    }
-                ]
-            }
-        );
-
+        const product = await prisma.product.findUnique({
+            where: { id: Number(req.params.productId) },
+            include: { user: { include: { profile: true } } }
+        });
 
         if (!product) {
             return handleResponse(res, 404, false, 'Product not found')
@@ -152,29 +134,26 @@ export const rejectProducts = async (req: Request, res: Response) => {
             return handleResponse(res, 400, false, 'Product already rejected')
         }
 
-        product.approved = false;
+        await prisma.product.update({ where: { id: product.id }, data: { approved: false } });
 
-        await product.save();
-
-        const prod = product.toJSON();
+        const prod: any = product;
 
         const email = rejectProductEmail(prod);
 
-        const { success, error } = await sendEmail(
+        const { success } = await sendEmail(
             prod.user.email,
             email.title,
             email.body,
-            prod.user.profile.firstName
+            prod.user.profile?.firstName
         )
 
-        if (prod.user?.fcmToken) {
-            await sendPushNotification(
-                prod.user.fcmToken,
-                'Product rejected',
-                `Your product - ${prod.name} has been rejected by admin`,
-                {}
-            );
-        }
+        await NotificationService.create({
+            userId: prod.userId,
+            type: NotificationType.SYSTEM,
+            title: 'Product Rejected',
+            message: `Your product "${prod.name}" has been rejected by admin`,
+            data: { productId: prod.id },
+        });
 
         return successResponse(res, 'success', { message: 'Product rejected successfully', emailSentStatus: success });
     } catch (error) {
@@ -185,12 +164,12 @@ export const rejectProducts = async (req: Request, res: Response) => {
 
 export const marketOversight = async (req: Request, res: Response) => {
     try {
-        const totalProducts = await Product.count();
-        const pendingProducts = await Product.count({ where: { approved: null } });
-        const approvedProducts = await Product.count({ where: { approved: true } });
-        const rejectedProducts = await Product.count({ where: { approved: false } });
-        const totalTransactions = await Transaction.count({ where: { status: TransactionStatus.SUCCESS } });
-        const disputedProducts = await ProductTransaction.count({ where: { status: ProductTransactionStatus.DISPUTED } });
+        const totalProducts = await prisma.product.count();
+        const pendingProducts = await prisma.product.count({ where: { approved: null } });
+        const approvedProducts = await prisma.product.count({ where: { approved: true } });
+        const rejectedProducts = await prisma.product.count({ where: { approved: false } });
+        const totalTransactions = await prisma.transaction.count({ where: { status: TransactionStatus.SUCCESS as any } });
+        const disputedProducts = await prisma.productTransaction.count({ where: { status: ProductTransactionStatus.DISPUTED as any } });
 
         return successResponse(res, 'success', {
             totalProducts,
@@ -208,12 +187,12 @@ export const marketOversight = async (req: Request, res: Response) => {
 
 export const deliveryOversight = async (req: Request, res: Response) => {
     try {
-        const totalDeliveries = await Order.count();
-        const unassignedDeliveries = await Order.count({ where: { status: OrderStatus.PAID } });
-        const assignedDeliveries = await Order.count({ where: { status: OrderStatus.ACCEPTED } });
-        const pickedUpDevliveries = await Order.count({ where: { status: OrderStatus.CONFIRM_PICKUP } });
-        const completedDeliveries = await Order.count({ where: { status: OrderStatus.CONFIRM_DELIVERY } });
-        const disputedDeliveries = await Order.count({ where: { status: OrderStatus.DISPUTED } });
+        const totalDeliveries = await prisma.order.count();
+        const unassignedDeliveries = await prisma.order.count({ where: { status: OrderStatus.PAID as any } });
+        const assignedDeliveries = await prisma.order.count({ where: { status: OrderStatus.ACCEPTED as any } });
+        const pickedUpDevliveries = await prisma.order.count({ where: { status: OrderStatus.CONFIRM_PICKUP as any } });
+        const completedDeliveries = await prisma.order.count({ where: { status: OrderStatus.CONFIRM_DELIVERY as any } });
+        const disputedDeliveries = await prisma.order.count({ where: { status: OrderStatus.DISPUTED as any } });
 
         return successResponse(res, 'success', {
             totalDeliveries,

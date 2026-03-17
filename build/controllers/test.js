@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -48,35 +15,25 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.testGetProfessional = exports.testRedis = exports.testNotification = exports.sendEmailTest = exports.sendSMSTest = void 0;
 exports.findPersonsNearby = findPersonsNearby;
 const notification_1 = require("../services/notification");
+// sendPushNotification is still exported for direct push testing
 const sms_1 = require("../services/sms");
 const modules_1 = require("../utils/modules");
 const messages_1 = require("../utils/messages");
 const gmail_1 = require("../services/gmail");
-const Location_1 = require("../models/Location");
-const sequelize_1 = __importStar(require("sequelize"));
+const prisma_1 = __importDefault(require("../config/prisma"));
 const redis_1 = __importDefault(require("../config/redis"));
-const db_1 = __importDefault(require("../config/db"));
-const Professional_1 = require("../models/Professional");
-const Profile_1 = require("../models/Profile");
 const sendSMSTest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { phone } = req.body;
-    // try {
     const status = yield (0, sms_1.sendSMS)(phone, '123456');
     return (0, modules_1.successResponse)(res, 'OTP sent successfully', { smsSendStatus: status });
-    // } catch (error) {
-    //     return errorResponse(res, 'error', error);
-    // }
 });
 exports.sendSMSTest = sendSMSTest;
 const sendEmailTest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { email } = req.body;
-    // try {
     const verifyEmailMsg = (0, messages_1.sendOTPEmail)('123456');
     const messageId = yield (0, gmail_1.sendEmail)(email, verifyEmailMsg.title, verifyEmailMsg.body, 'User');
     let emailSendStatus = Boolean(messageId);
     return (0, modules_1.successResponse)(res, 'OTP sent successfully', { emailSendStatus, messsageId: messageId });
-    // } catch (error) {
-    //     return errorResponse(res, 'error', error);
 });
 exports.sendEmailTest = sendEmailTest;
 const testNotification = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -99,21 +56,17 @@ function findPersonsNearby(req, res) {
         const { lat, lng, radiusInKm } = req.body;
         const distanceQuery = `
     6371 * acos(
-      cos(radians(:lat)) * cos(radians("latitude")) *
-      cos(radians("longitude") - radians(:lng)) +
-      sin(radians(:lat)) * sin(radians("latitude"))
+      cos(radians(${lat})) * cos(radians(latitude)) *
+      cos(radians(longitude) - radians(${lng})) +
+      sin(radians(${lat})) * sin(radians(latitude))
     )
   `;
-        const location = yield Location_1.Location.findAll({
-            attributes: {
-                include: [
-                    [sequelize_1.default.literal(distanceQuery), 'distance']
-                ]
-            },
-            where: sequelize_1.default.where(sequelize_1.default.literal(distanceQuery), { [sequelize_1.Op.lte]: radiusInKm }),
-            replacements: { lat, lng },
-            order: sequelize_1.default.literal('distance ASC'),
-        });
+        const location = yield prisma_1.default.$queryRawUnsafe(`
+        SELECT *, (${distanceQuery}) AS distance
+        FROM location
+        WHERE (${distanceQuery}) <= ${radiusInKm}
+        ORDER BY distance ASC
+    `);
         return (0, modules_1.successResponse)(res, 'Persons found nearby', { location });
     });
 }
@@ -129,42 +82,24 @@ const testRedis = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.testRedis = testRedis;
 const testGetProfessional = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     try {
         const { professionalId } = req.params;
-        const professional = yield Professional_1.Professional.findOne({
-            where: { id: professionalId },
-            include: [
-                {
-                    model: Profile_1.Profile,
-                    as: 'profile',
-                    attributes: []
-                }
-            ],
-            attributes: {
-                include: [
-                    [
-                        db_1.default.literal(`(
-                            SELECT AVG(value)
-                            FROM rating
-                            WHERE rating.professionalUserId = profile.userId
-                            )`),
-                        'avgRating'
-                    ],
-                    [
-                        db_1.default.literal(`(
-                            SELECT COUNT(*)
-                            FROM rating
-                            WHERE rating.professionalUserId = profile.userId
-                            )`),
-                        'numRating'
-                    ]
-                ]
+        const professional = yield prisma_1.default.professional.findUnique({
+            where: { id: Number(professionalId) },
+            include: {
+                profile: { select: { userId: true } }
             }
         });
         if (!professional) {
             return (0, modules_1.handleResponse)(res, 404, false, "Professional not found");
         }
-        return (0, modules_1.successResponse)(res, 'success', professional);
+        const ratingAgg = yield prisma_1.default.rating.aggregate({
+            where: { professionalUserId: (_a = professional.profile) === null || _a === void 0 ? void 0 : _a.userId },
+            _avg: { value: true },
+            _count: { value: true }
+        });
+        return (0, modules_1.successResponse)(res, 'success', Object.assign(Object.assign({}, professional), { avgRating: (_b = ratingAgg._avg.value) !== null && _b !== void 0 ? _b : 0, numRating: (_c = ratingAgg._count.value) !== null && _c !== void 0 ? _c : 0 }));
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, 'error', error);

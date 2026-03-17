@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { addReviewSchema } from "../validation/body";
-import { Job, Order, ProductTransaction, Review, User } from "../models/Models";
+import prisma from "../config/prisma";
 import { JobStatus, OrderStatus, UserRole } from "../utils/enum";
 import { errorResponse, handleResponse, successResponse } from "../utils/modules";
 import { z } from "zod";
@@ -20,27 +20,22 @@ export const giveReview = async (req: Request, res: Response) => {
 
         const { review, jobId, orderId } = result.data
 
-        let user;
-        let job;
-        let order;
+        let user: any;
+        let job: any;
+        let order: any;
 
         if (jobId) {
-            const existingReview = await Review.findOne({
-                where: {
-                    jobId,
-                    clientUserId: id
-                }
+            const existingReview = await prisma.review.findFirst({
+                where: { jobId, clientUserId: id }
             })
 
             if (existingReview) {
                 return handleResponse(res, 400, false, 'You have already reviewed this job')
             }
 
-            job = await Job.findByPk(jobId, {
-                include: [{
-                    model: User,
-                    as: "professional"
-                }]
+            job = await prisma.job.findUnique({
+                where: { id: jobId },
+                include: { professional: true }
             })
 
             if (!job) {
@@ -59,24 +54,20 @@ export const giveReview = async (req: Request, res: Response) => {
         }
 
         if (orderId) {
-            const existingReview = await Review.findOne({
-                where: {
-                    orderId,
-                    clientUserId: id
-                }
+            const existingReview = await prisma.review.findFirst({
+                where: { orderId, clientUserId: id }
             })
 
             if (existingReview) {
                 return handleResponse(res, 400, false, 'You have already reviewed this order')
             }
 
-            order = await Order.findByPk(orderId, {
-                include: [{
-                    model: User,
-                    as: "rider"
-                }, {
-                    model: ProductTransaction
-                }]
+            order = await prisma.order.findUnique({
+                where: { id: orderId },
+                include: {
+                    rider: true,
+                    productTransaction: true
+                }
             })
 
             if (!order) {
@@ -103,12 +94,14 @@ export const giveReview = async (req: Request, res: Response) => {
         }
 
 
-        const reviewObj = await Review.create({
-            text: review,
-            professionalUserId: user.id,
-            clientUserId: id,
-            ...(user.role === UserRole.DELIVERY ? { orderId } : {}),
-            ...(user.role === UserRole.PROFESSIONAL ? { jobId } : {})
+        const reviewObj = await prisma.review.create({
+            data: {
+                text: review,
+                professionalUserId: user.id,
+                clientUserId: id,
+                ...(user.role === UserRole.DELIVERY ? { orderId } : {}),
+                ...(user.role === UserRole.PROFESSIONAL ? { jobId } : {})
+            }
         });
 
 
@@ -137,7 +130,7 @@ export const editReview = async (req: Request, res: Response) => {
 
         const { review } = result.data;
 
-        const reviewObj = await Review.findByPk(reviewId);
+        const reviewObj = await prisma.review.findUnique({ where: { id: BigInt(reviewId) } });
 
         if (!reviewObj) {
             return errorResponse(res, 'error', "Review not found")
@@ -147,11 +140,12 @@ export const editReview = async (req: Request, res: Response) => {
             return errorResponse(res, 'error', "You are not authorized to edit this review")
         }
 
-        reviewObj.text = review;
+        const updated = await prisma.review.update({
+            where: { id: BigInt(reviewId) },
+            data: { text: review }
+        });
 
-        await reviewObj.save();
-
-        return successResponse(res, 'success', { reviewObj })
+        return successResponse(res, 'success', { reviewObj: updated })
     } catch (error) {
         console.log(error)
         return errorResponse(res, 'error', "Internal server error")
@@ -163,7 +157,7 @@ export const deleteReview = async (req: Request, res: Response) => {
         const { reviewId } = req.params;
         const { id } = req.user;
 
-        const reviewObj = await Review.findByPk(reviewId);
+        const reviewObj = await prisma.review.findUnique({ where: { id: BigInt(reviewId) } });
 
         if (!reviewObj) {
             return errorResponse(res, 'error', "Review not found")
@@ -173,7 +167,7 @@ export const deleteReview = async (req: Request, res: Response) => {
             return errorResponse(res, 'error', "You are not authorized to delete this review")
         }
 
-        await reviewObj.destroy();
+        await prisma.review.delete({ where: { id: BigInt(reviewId) } });
 
         return successResponse(res, 'success', { message: "Review deleted successfully" })
     } catch (error) {

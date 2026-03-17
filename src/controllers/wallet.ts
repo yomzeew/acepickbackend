@@ -1,32 +1,32 @@
 import { Request, Response } from "express"
 import bcrypt from "bcryptjs"
+import prisma from "../config/prisma";
 import { errorResponse, handleResponse, successResponse, randomId } from "../utils/modules";
 import { Accounts, JobStatus, OrderMethod, OrderStatus, PayStatus, ProductTransactionStatus, TransactionType } from "../utils/enum";
-import { v4 as uuidv4 } from 'uuid';
 import { paymentSchema, pinForgotSchema, pinResetSchema, productPaymentSchema } from "../validation/body";
-import { Job, Wallet, Transaction, User, Profile, ProductTransaction, Product, Order } from "../models/Models";
-import { randomUUID } from "crypto";
 import { jobPaymentEmail, productPaymentEmail } from "../utils/messages";
 import { sendEmail } from "../services/gmail";
-import { sendPushNotification } from "../services/notification";
+import { NotificationService } from "../services/notification";
+import { NotificationType } from "../utils/enum";
 import z from "zod";
 import { LedgerService } from "../services/ledgerService";
+import { notifyNearbyRiders } from "./order";
 
 export const createWallet = async (req: Request, res: Response) => {
     const { id } = req.user;
     const { currency = 'NGN' } = req.body;
 
     try {
-        const wallet = await Wallet.create({
-            userId: id,
-            currency: currency,
-            currentBalance: 0,
-            previousBalance: 0
+        const wallet = await prisma.wallet.create({
+            data: {
+                userId: id,
+                currency: currency,
+                currentBalance: 0,
+                previousBalance: 0
+            }
         });
 
-        wallet.setDataValue('isActive', wallet.pin !== null)
-
-        return successResponse(res, "success", wallet);
+        return successResponse(res, "success", { ...wallet, pin: undefined, isActive: wallet.pin !== null });
     } catch (error: any) {
         return errorResponse(res, 'error', error.message);
     }
@@ -36,20 +36,17 @@ export const viewWallet = async (req: Request, res: Response) => {
     const { id } = req.user;
 
     try {
-        const wallet = await Wallet.findOne({
+        const wallet = await prisma.wallet.findFirst({
             where: { userId: id },
-            attributes: {
-                exclude: ['pin']
-            },
         });
 
         if (!wallet) {
             return handleResponse(res, 404, false, "Wallet not found");
         }
 
-        wallet.setDataValue('isActive', wallet.pin !== null)
+        const { pin, ...walletData } = wallet;
 
-        return successResponse(res, "success", wallet);
+        return successResponse(res, "success", { ...walletData, isActive: pin !== null });
     } catch (error) {
         return errorResponse(res, "An error occurred", error);
     }
@@ -58,7 +55,6 @@ export const viewWallet = async (req: Request, res: Response) => {
 export const debitWallet = async (req: Request, res: Response) => {
     const { id, role } = req.user;
 
-    // Usage example
     const result = paymentSchema.safeParse(req.body);
 
     if (!result.success) {
@@ -67,22 +63,13 @@ export const debitWallet = async (req: Request, res: Response) => {
 
     const { amount, pin, reason, jobId } = result.data;
 
-
-    const job = await Job.findByPk(jobId, {
-        include: [
-            {
-                model: User,
-                as: 'client',
-                include: [Profile]
-            },
-            {
-                model: User,
-                as: 'professional',
-                include: [Profile]
-            }
-        ]
+    const job = await prisma.job.findUnique({
+        where: { id: jobId },
+        include: {
+            client: { include: { profile: true } },
+            professional: { include: { profile: true } }
+        }
     });
-
 
     if (!job) {
         return handleResponse(res, 404, false, 'Job not found');
@@ -93,7 +80,7 @@ export const debitWallet = async (req: Request, res: Response) => {
     }
 
     try {
-        const wallet = await Wallet.findOne({ where: { userId: id } });
+        const wallet = await prisma.wallet.findFirst({ where: { userId: id } });
 
         if (!wallet) {
             return handleResponse(res, 404, false, 'Wallet not found')
@@ -111,49 +98,59 @@ export const debitWallet = async (req: Request, res: Response) => {
 
         let prevBalance = Number(wallet.currentBalance);
 
-        //console.log('prevBalance', prevBalance, typeof prevBalance, 'amount', amount, typeof amount);
-
         if (prevBalance < amount) {
             return handleResponse(res, 400, false, 'Insufficient balance')
         }
 
         let currBalance = prevBalance - amount;
 
-        await wallet.update({
-            currentBalance: currBalance,
-            previousBalance: prevBalance
+        await prisma.wallet.update({
+            where: { id: wallet.id },
+            data: {
+                currentBalance: currBalance,
+                previousBalance: prevBalance
+            }
         });
 
-        await wallet.save();
+        const paymentRef = randomId(12);
 
+        await prisma.job.update({
+            where: { id: job.id },
+            data: {
+                payStatus: PayStatus.PAID as any,
+                paymentRef,
+                status: JobStatus.ONGOING as any,
+            }
+        });
 
-        job.payStatus = PayStatus.PAID;
+        // Update client profile ongoing jobs
+        if (job.client?.profile) {
+            await prisma.profile.update({
+                where: { id: job.client.profile.id },
+                data: { totalJobsOngoing: Number(job.client.profile.totalJobsOngoing || 0) + 1 }
+            });
+        }
 
-        job.paymentRef = randomId(12);
+        // Update professional profile ongoing jobs
+        if (job.professional?.profile) {
+            await prisma.profile.update({
+                where: { id: job.professional.profile.id },
+                data: { totalJobsOngoing: Number(job.professional.profile.totalJobsOngoing || 0) + 1 }
+            });
+        }
 
-        job.status = JobStatus.ONGOING;
-
-        await job.save();
-
-        job.client.profile.totalJobsOngoing = Number(job.client.profile.totalJobsOngoing || 0) + 1;
-
-        job.professional.profile.totalJobsOngoing = Number(job.professional.profile.totalJobsOngoing || 0) + 1;
-
-        await job.client.profile.save();
-
-        await job.professional.profile.save();
-
-
-        const transaction = await Transaction.create({
-            userId: id,
-            jobId: jobId || null,
-            amount: amount,
-            reference: job.paymentRef,
-            status: 'success',
-            channel: 'wallet',
-            timestamp: Date.now(),
-            description: 'job wallet payment',
-            type: TransactionType.DEBIT,
+        const transaction = await prisma.transaction.create({
+            data: {
+                userId: id,
+                jobId: jobId || null,
+                amount: amount,
+                reference: paymentRef,
+                status: 'success',
+                channel: 'wallet',
+                timestamp: new Date(),
+                description: 'job wallet payment',
+                type: TransactionType.DEBIT as any,
+            }
         })
 
         await LedgerService.createEntry([
@@ -164,7 +161,6 @@ export const debitWallet = async (req: Request, res: Response) => {
                 type: TransactionType.DEBIT,
                 account: Accounts.USER_WALLET
             },
-
             {
                 transactionId: transaction.id,
                 userId: null,
@@ -176,24 +172,20 @@ export const debitWallet = async (req: Request, res: Response) => {
 
         const emailTosend = jobPaymentEmail(job);
 
-        const msgStat = await sendEmail(
-            job.dataValues.professional.email,
+        await sendEmail(
+            job.professional!.email,
             emailTosend.title,
             emailTosend.body,
-            job.dataValues.professional.profile.firstName + ' ' + job.dataValues.professional.profile.lastName
-            //'User'
+            job.professional!.profile!.firstName + ' ' + job.professional!.profile!.lastName
         )
 
-        //Send notification to the client
-        if (job.dataValues.professional.fcmToken) {
-            await sendPushNotification(
-                job.dataValues.professional.fcmToken,
-                'Job Payment',
-                `Your Job: ${job.dataValues.title} has been paid}`,
-                {}
-            );
-        }
-
+        await NotificationService.create({
+            userId: job.professionalId,
+            type: NotificationType.PAYMENT,
+            title: 'Job Payment Received',
+            message: `Your job "${job.title}" has been paid`,
+            data: { jobId: job.id },
+        });
 
         return successResponse(res, 'success', transaction)
 
@@ -205,7 +197,6 @@ export const debitWallet = async (req: Request, res: Response) => {
 export const debitWalletForProductOrder = async (req: Request, res: Response) => {
     const { id, role } = req.user;
 
-    // Usage example
     const result = productPaymentSchema.safeParse(req.body);
 
     if (!result.success) {
@@ -214,26 +205,14 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
 
     const { amount, pin, reason, productTransactionId } = result.data;
 
-
-    const productTransaction = await ProductTransaction.findByPk(productTransactionId, {
-        include: [
-            {
-                model: User,
-                as: 'buyer',
-                include: [Profile]
-            },
-            {
-                model: User,
-                as: 'seller',
-                include: [Profile]
-            },
-            {
-                model: Product
-            },
-            {
-                model: Order,
-            }
-        ]
+    const productTransaction = await prisma.productTransaction.findUnique({
+        where: { id: productTransactionId },
+        include: {
+            buyer: { include: { profile: true } },
+            seller: { include: { profile: true } },
+            product: true,
+            order: true,
+        }
     });
 
     if (!productTransaction) {
@@ -241,7 +220,7 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
     }
 
     try {
-        const wallet = await Wallet.findOne({ where: { userId: id } });
+        const wallet = await prisma.wallet.findFirst({ where: { userId: id } });
 
         if (!wallet) {
             return handleResponse(res, 404, false, 'Wallet not found')
@@ -258,8 +237,6 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
         }
 
         let prevBalance = Number(wallet.currentBalance);
-
-        //console.log('prevBalance', prevBalance, typeof prevBalance, 'amount', amount, typeof amount);
 
         if (prevBalance < amount) {
             return handleResponse(res, 400, false, 'Insufficient balance')
@@ -276,10 +253,9 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
             }
 
             desc = 'product_order wallet payment'
-
             isProductOrder = true
         } else {
-            if (amount < productTransaction.price) {
+            if (amount < Number(productTransaction.price)) {
                 return handleResponse(res, 404, false, 'Insufficient amount for product')
             }
 
@@ -288,38 +264,66 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
 
         let currBalance = prevBalance - amount;
 
-        await wallet.update({
-            currentBalance: currBalance,
-            previousBalance: prevBalance
+        await prisma.wallet.update({
+            where: { id: wallet.id },
+            data: {
+                currentBalance: currBalance,
+                previousBalance: prevBalance
+            }
         });
 
-        await wallet.save();
+        await prisma.productTransaction.update({
+            where: { id: productTransaction.id },
+            data: { status: ProductTransactionStatus.ORDERED as any }
+        });
 
-        if (isProductOrder) {
-            productTransaction.status = ProductTransactionStatus.ORDERED;
+        if (isProductOrder && productTransaction.order) {
+            await prisma.order.update({
+                where: { id: productTransaction.order.id },
+                data: { status: OrderStatus.PAID as any }
+            });
 
-            productTransaction.order.status = OrderStatus.PAID;
+            // Auto-notify nearby riders about the new delivery
+            const orderWithDetails = await prisma.order.findUnique({
+                where: { id: productTransaction.order.id },
+                include: {
+                    dropoffLocation: true,
+                    productTransaction: {
+                        include: {
+                            product: { include: { pickupLocation: true } },
+                            seller: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
+                            buyer: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
+                        }
+                    }
+                }
+            });
 
-            await productTransaction.save();
-
-            await productTransaction.order.save();
-        } else {
-            productTransaction.status = ProductTransactionStatus.ORDERED;
-
-            await productTransaction.save();
+            if (orderWithDetails) {
+                const pickup = orderWithDetails.productTransaction?.product?.pickupLocation;
+                const dropoff = orderWithDetails.dropoffLocation;
+                if (pickup?.latitude && pickup?.longitude && dropoff?.latitude && dropoff?.longitude) {
+                    notifyNearbyRiders(
+                        orderWithDetails,
+                        Number(pickup.latitude), Number(pickup.longitude),
+                        Number(dropoff.latitude), Number(dropoff.longitude)
+                    );
+                }
+            }
         }
 
-        const transaction = await Transaction.create({
-            userId: id,
-            jobId: null,
-            amount: amount,
-            reference: randomId(12),
-            status: 'success',
-            channel: 'wallet',
-            timestamp: Date.now(),
-            productTransactionId,
-            description: desc,
-            type: TransactionType.DEBIT,
+        const transaction = await prisma.transaction.create({
+            data: {
+                userId: id,
+                jobId: null,
+                amount: amount,
+                reference: randomId(12),
+                status: 'success',
+                channel: 'wallet',
+                timestamp: new Date(),
+                productTransactionId,
+                description: desc,
+                type: TransactionType.DEBIT as any,
+            }
         })
 
         await LedgerService.createEntry([
@@ -330,7 +334,6 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
                 type: TransactionType.DEBIT,
                 account: Accounts.USER_WALLET
             },
-
             {
                 transactionId: transaction.id,
                 userId: null,
@@ -340,25 +343,46 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
             }
         ])
 
+        const emailContent = productPaymentEmail(productTransaction);
 
-        const email = productPaymentEmail(productTransaction);
-
-        const msgStat = await sendEmail(
+        await sendEmail(
             productTransaction.seller.email,
-            email.title,
-            email.body,
-            productTransaction.seller.profile.firstName + ' ' + productTransaction.seller.profile.lastName,
+            emailContent.title,
+            emailContent.body,
+            productTransaction.seller.profile?.firstName + ' ' + productTransaction.seller.profile?.lastName,
         )
 
-        //Send notification to the client
-        sendPushNotification(
-            productTransaction.seller.fcmToken,
-            `Product Payment`,
-            `${productTransaction?.quantity} of your product: ${productTransaction?.product.name} has been paid by ${productTransaction?.buyer.profile.firstName} ${productTransaction?.buyer.profile.lastName}`,
-            {}
-        );
+        await NotificationService.create({
+            userId: productTransaction.sellerId,
+            type: NotificationType.PAYMENT,
+            title: 'Product Payment Received',
+            message: `${productTransaction?.quantity} of your product: ${productTransaction?.product.name} has been paid by ${productTransaction?.buyer.profile?.firstName} ${productTransaction?.buyer.profile?.lastName}`,
+            data: { productTransactionId: productTransaction.id },
+        });
 
+        // Self-pickup: notify vendor that buyer will collect the item
+        if (productTransaction.orderMethod === OrderMethod.SELF_PICKUP) {
+            await NotificationService.create({
+                userId: productTransaction.sellerId,
+                type: NotificationType.ORDER,
+                title: 'Self-Pickup Order',
+                message: `${productTransaction?.buyer.profile?.firstName} ${productTransaction?.buyer.profile?.lastName} will self-pickup ${productTransaction?.quantity}x ${productTransaction?.product.name}. Please prepare the item.`,
+                data: { productTransactionId: productTransaction.id, orderMethod: 'self_pickup' },
+            });
 
+            try {
+                const { getIO } = require('../chat');
+                const { Emit } = require('../utils/events');
+                getIO().to(productTransaction.sellerId).emit(Emit.ORDER_STATUS_UPDATE, {
+                    data: {
+                        productTransactionId: productTransaction.id,
+                        status: 'self_pickup_paid',
+                        orderMethod: 'self_pickup',
+                        buyer: productTransaction.buyer,
+                    }
+                });
+            } catch (e) { /* socket may not be initialized */ }
+        }
 
         return successResponse(res, 'success', transaction)
 
@@ -367,117 +391,8 @@ export const debitWalletForProductOrder = async (req: Request, res: Response) =>
     }
 }
 
-// export const debitWalletForProductOrder = async (req: Request, res: Response) => {
-//     const { id, role } = req.user;
-
-//     // Usage example
-//     const result = productPaymentSchema.safeParse(req.body);
-
-//     if (!result.success) {
-//         return res.status(400).json({ errors: result.error.format() });
-//     }
-
-//     const { amount, pin, reason, productTransactionId } = result.data;
-
-
-//     const productTransaction = await ProductTransaction.findByPk(productTransactionId, {
-//         include: [
-//             {
-//                 model: User,
-//                 as: 'buyer',
-//                 include: [Profile]
-//             },
-//             {
-//                 model: User,
-//                 as: 'seller',
-//                 include: [Profile]
-//             },
-//             {
-//                 model: Product
-//             }
-//         ]
-//     });
-
-//     if (!productTransaction) {
-//         return handleResponse(res, 404, false, 'Product transaction not found');
-//     }
-
-//     try {
-//         const wallet = await Wallet.findOne({ where: { userId: id } });
-
-//         if (!wallet) {
-//             return handleResponse(res, 404, false, 'Wallet not found')
-//         }
-
-//         if (!wallet.pin) {
-//             return handleResponse(res, 400, false, 'Pin not set')
-//         }
-
-//         const match = await bcrypt.compare(pin, wallet.pin);
-
-//         if (!match) {
-//             return handleResponse(res, 400, false, 'Incorrect pin')
-//         }
-
-//         let prevBalance = Number(wallet.currentBalance);
-
-//         //console.log('prevBalance', prevBalance, typeof prevBalance, 'amount', amount, typeof amount);
-
-//         if (prevBalance < amount) {
-//             return handleResponse(res, 400, false, 'Insufficient balance')
-//         }
-
-//         let currBalance = prevBalance - amount;
-
-//         await wallet.update({
-//             currentBalance: currBalance,
-//             previousBalance: prevBalance
-//         });
-
-//         await wallet.save();
-
-//         const transaction = await Transaction.create({
-//             userId: id,
-//             jobId: null,
-//             amount: amount,
-//             reference: randomId(12),
-//             status: 'success',
-//             channel: 'wallet',
-//             timestamp: Date.now(),
-//             productTransactionId,
-//             description: reason || 'Wallet payment',
-//             type: TransactionType.DEBIT,
-//         })
-
-//         const email = productPaymentEmail(productTransaction);
-
-//         const msgStat = await sendEmail(
-//             productTransaction.seller.email,
-//             email.title,
-//             email.body,
-//             productTransaction.seller.profile.firstName + ' ' + productTransaction.seller.profile.lastName,
-//         )
-
-//         //Send notification to the client
-//         sendPushNotification(
-//             productTransaction.seller.fcmToken,
-//             `Product Payment`,
-//             `${productTransaction?.quantity} of your product: ${productTransaction?.product.name} has been paid by ${productTransaction?.buyer.profile.firstName} ${productTransaction?.buyer.profile.lastName}`,
-//             {}
-//         );
-
-
-
-//         return successResponse(res, 'success', transaction)
-
-//     } catch (error: any) {
-//         return errorResponse(res, 'error', error.message)
-//     }
-// }
-
 export const setPin = async (req: Request, res: Response) => {
     const { id, role } = req.user;
-
 
     const pinSchema = z.object({
         pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
@@ -489,12 +404,10 @@ export const setPin = async (req: Request, res: Response) => {
         return res.status(400).json({ errors: result.error.format() });
     }
 
-
     const { pin } = result.data;
 
-
     try {
-        const wallet = await Wallet.findOne({ where: { userId: id } });
+        const wallet = await prisma.wallet.findFirst({ where: { userId: id } });
 
         if (!wallet) {
             return handleResponse(res, 404, false, 'Wallet not found')
@@ -503,9 +416,10 @@ export const setPin = async (req: Request, res: Response) => {
         // Hash pin
         const hashedPin = await bcrypt.hash(pin, 10);
 
-        await wallet.update({ pin: hashedPin });
-
-        await wallet.save();
+        await prisma.wallet.update({
+            where: { id: wallet.id },
+            data: { pin: hashedPin }
+        });
 
         return successResponse(res, 'success', 'Pin set successfully')
 
@@ -518,8 +432,6 @@ export const setPin = async (req: Request, res: Response) => {
 export const resetPin = async (req: Request, res: Response) => {
     const { id, role } = req.user;
 
-
-    // Usage example
     const result = pinResetSchema.safeParse(req.body);
 
     if (!result.success) {
@@ -529,7 +441,7 @@ export const resetPin = async (req: Request, res: Response) => {
     const { newPin, oldPin } = result.data;
 
     try {
-        const wallet = await Wallet.findOne({ where: { userId: id } });
+        const wallet = await prisma.wallet.findFirst({ where: { userId: id } });
 
         if (!wallet) {
             return handleResponse(res, 404, false, 'Wallet not found')
@@ -549,9 +461,10 @@ export const resetPin = async (req: Request, res: Response) => {
         // Hash pin
         const hashedPin = await bcrypt.hash(newPin, 10);
 
-        wallet.pin = hashedPin;
-
-        await wallet.save();
+        await prisma.wallet.update({
+            where: { id: wallet.id },
+            data: { pin: hashedPin }
+        });
 
         return successResponse(res, 'success', 'Pin reset successfully')
     } catch (error) {
@@ -571,7 +484,7 @@ export const forgotPin = async (req: Request, res: Response) => {
 
         const { newPin, newPinConfirm } = result.data;
 
-        const wallet = await Wallet.findOne({ where: { userId: id } });
+        const wallet = await prisma.wallet.findFirst({ where: { userId: id } });
 
         if (!wallet) {
             return handleResponse(res, 404, false, 'Wallet not found')
@@ -584,9 +497,10 @@ export const forgotPin = async (req: Request, res: Response) => {
 
         const hashedPin = await bcrypt.hash(newPin, 10);
 
-        wallet.pin = hashedPin;
-
-        await wallet.save();
+        await prisma.wallet.update({
+            where: { id: wallet.id },
+            data: { pin: hashedPin }
+        });
 
         return successResponse(res, 'success', 'Pin reset successfully')
     } catch (error) {
@@ -599,21 +513,22 @@ export const creditWallet = async (req: Request, res: Response) => {
         const { id } = req.user;
         const { amount, userId } = req.body;
 
-        const wallet = await Wallet.findOne({ where: { userId: userId ? userId : id } });
+        const wallet = await prisma.wallet.findFirst({ where: { userId: userId ? userId : id } });
 
         if (!wallet) {
             return handleResponse(res, 404, false, 'Wallet not found')
         }
 
-        wallet.previousBalance = Number(wallet.currentBalance);
+        const updated = await prisma.wallet.update({
+            where: { id: wallet.id },
+            data: {
+                previousBalance: Number(wallet.currentBalance),
+                currentBalance: Number(wallet.currentBalance) + Number(amount),
+            }
+        });
 
-        wallet.currentBalance = Number(wallet.currentBalance) + Number(amount);
-
-        await wallet.save();
-
-        return successResponse(res, 'success', { balance: wallet.currentBalance })
+        return successResponse(res, 'success', { balance: updated.currentBalance })
     } catch (error) {
         return errorResponse(res, 'error', error)
     }
 }
-

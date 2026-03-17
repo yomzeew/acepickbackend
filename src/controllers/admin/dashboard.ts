@@ -1,80 +1,51 @@
 import { Request, Response } from "express"
-import { Order, User, Transaction, Activity, Profile } from '../../models/Models'
+import prisma from "../../config/prisma";
 import { OrderStatus, TransactionStatus, TransactionType, UserRole } from "../../utils/enum";
-import { Op, QueryTypes } from "sequelize";
 import { errorResponse, successResponse, nestFlatKeys } from "../../utils/modules";
 import { activitySchema } from "../../validation/query";
-import dbsequelize from '../../config/db'
 import z from "zod";
 
 export const overviewStat = async (req: Request, res: Response) => {
 
     try {
-        const totalUsers = await User.count();
+        const totalUsers = await prisma.user.count();
 
-        const clients = await User.count({
-            where: {
-                role: UserRole.CLIENT
-            }
-        })
+        const clients = await prisma.user.count({ where: { role: UserRole.CLIENT as any } })
 
-        const professionals = await User.count({
-            where: {
-                role: UserRole.PROFESSIONAL
-            }
-        })
+        const professionals = await prisma.user.count({ where: { role: UserRole.PROFESSIONAL as any } })
 
-        const riders = await User.count({
-            where: {
-                role: UserRole.DELIVERY
-            }
-        })
+        const riders = await prisma.user.count({ where: { role: UserRole.DELIVERY as any } })
 
-        const corperates = await User.count({
-            where: {
-                role: UserRole.CORPERATE
-            }
-        })
+        const corperates = await prisma.user.count({ where: { role: UserRole.CORPERATE as any } })
 
-        const admins = await User.count({
-            where: {
-                role: UserRole.ADMIN
-            }
-        })
+        const admins = await prisma.user.count({ where: { role: UserRole.ADMIN as any } })
 
-        const activeOrders = await Order.count({
+        const activeOrders = await prisma.order.count({
             where: {
-                status: {
-                    [Op.notIn]: [OrderStatus.CONFIRM_DELIVERY, OrderStatus.CANCELLED]
-                }
+                status: { notIn: [OrderStatus.CONFIRM_DELIVERY as any, OrderStatus.CANCELLED as any] }
             }
         });
 
-        const activeDeliveries = await Order.count({
+        const activeDeliveries = await prisma.order.count({
             where: {
-                status: {
-                    [Op.notIn]: [OrderStatus.PAID, OrderStatus.CONFIRM_DELIVERY, OrderStatus.CANCELLED]
-                }
+                status: { notIn: [OrderStatus.PAID as any, OrderStatus.CONFIRM_DELIVERY as any, OrderStatus.CANCELLED as any] }
             }
         });
-
-        //check it later error here
 
         const startOfMonth = new Date();
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
 
-        const monthlyRevenue = await Transaction.sum('amount', {
+        const monthlyRevenueAgg = await prisma.transaction.aggregate({
             where: {
-                status: TransactionStatus.SUCCESS,
-                type: TransactionType.CREDIT,
-                createdAt: {
-                    [Op.gte]: startOfMonth,
-                    [Op.lte]: new Date()
-                }
-            }
+                status: TransactionStatus.SUCCESS as any,
+                type: TransactionType.CREDIT as any,
+                createdAt: { gte: startOfMonth, lte: new Date() }
+            },
+            _sum: { amount: true }
         });
 
+        const monthlyRevenue = monthlyRevenueAgg._sum.amount ? Number(monthlyRevenueAgg._sum.amount) : 0;
 
         return successResponse(res, 'success', {
             totalUsers,
@@ -85,7 +56,7 @@ export const overviewStat = async (req: Request, res: Response) => {
             admins,
             activeOrders,
             activeDeliveries,
-            monthlyRevenue: monthlyRevenue ? monthlyRevenue : 0
+            monthlyRevenue
         })
     } catch (error) {
         console.log(error)
@@ -107,23 +78,27 @@ export const getActivities = async (req: Request, res: Response) => {
     const { page, limit, search, type, status } = result.data;
 
     try {
-        const activities = await Activity.findAndCountAll({
-            where: {
-                ...(type && { type }),
-                ...(search && {
-                    [Op.or]: [
-                        { type: { [Op.like]: `%${search}%` } },
-                        { action: { [Op.like]: `%${search}%` } },
-                    ],
-                }),
-                ...(status && (status === 'all' ? {} : { status })),
-            },
-            order: [['createdAt', 'DESC']],
-            offset: (page - 1) * limit,
-            limit
-        })
+        const where: any = {};
+        if (type) where.type = type;
+        if (status && status !== 'all') where.status = status;
+        if (search) {
+            where.OR = [
+                { type: { contains: search } },
+                { action: { contains: search } },
+            ];
+        }
 
-        return successResponse(res, 'success', { ...activities, page, limit })
+        const [activities, count] = await Promise.all([
+            prisma.activity.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit
+            }),
+            prisma.activity.count({ where })
+        ]);
+
+        return successResponse(res, 'success', { rows: activities, count, page, limit })
     } catch (error) {
         console.log(error);
         return errorResponse(res, 'error', 'Something went wrong')
@@ -173,14 +148,14 @@ export const getTopPerformers = async (req: Request, res: Response) => {
     const { page, limit } = result.data;
 
     try {
-        const topPerformers = await dbsequelize.query(`
+        const topPerformers: any[] = await prisma.$queryRawUnsafe(`
             WITH rating_stats AS (
               SELECT 
-                professionalUserId,
-                AVG(value) AS avgValue,
-                COUNT(*) AS numRatings
+                "professionalUserId",
+                AVG(value) AS "avgValue",
+                COUNT(*) AS "numRatings"
               FROM rating
-              GROUP BY professionalUserId
+              GROUP BY "professionalUserId"
             )
             SELECT 
               u.id,
@@ -189,63 +164,61 @@ export const getTopPerformers = async (req: Request, res: Response) => {
               u.status,
               u.role,
               u.agreed,
-              u.createdAt,
-              u.updatedAt,
+              u."createdAt",
+              u."updatedAt",
           
               p.id AS "profile.id",
-              p.firstName AS "profile.firstName",
-              p.lastName AS "profile.lastName",
-              p.fcmToken AS "profile.fcmToken",
+              p."firstName" AS "profile.firstName",
+              p."lastName" AS "profile.lastName",
+              p."fcmToken" AS "profile.fcmToken",
               p.avatar AS "profile.avatar",
-              p.birthDate AS "profile.birthDate",
+              p."birthDate" AS "profile.birthDate",
               p.verified AS "profile.verified",
               p.notified AS "profile.notified",
-              p.totalJobs AS "profile.totalJobs",
-              p.totalExpense AS "profile.totalExpense",
+              p."totalJobs" AS "profile.totalJobs",
+              p."totalExpense" AS "profile.totalExpense",
               p.rate AS "profile.rate",
-              p.totalJobsDeclined AS "profile.totalJobsDeclined",
-              p.totalJobsPending AS "profile.totalJobsPending",
+              p."totalJobsDeclined" AS "profile.totalJobsDeclined",
+              p."totalJobsPending" AS "profile.totalJobsPending",
               p.count AS "profile.count",
-              p.totalJobsOngoing AS "profile.totalJobsOngoing",
-              p.totalJobsCompleted AS "profile.totalJobsCompleted",
-              p.totalReview AS "profile.totalReview",
-              p.totalJobsApproved AS "profile.totalJobsApproved",
-              p.totalJobsCanceled AS "profile.totalJobsCanceled",
-              p.totalDisputes AS "profile.totalDisputes",
+              p."totalJobsOngoing" AS "profile.totalJobsOngoing",
+              p."totalJobsCompleted" AS "profile.totalJobsCompleted",
+              p."totalReview" AS "profile.totalReview",
+              p."totalJobsApproved" AS "profile.totalJobsApproved",
+              p."totalJobsCanceled" AS "profile.totalJobsCanceled",
+              p."totalDisputes" AS "profile.totalDisputes",
               p.bvn AS "profile.bvn",
-              p.bvnVerified AS "profile.bvnVerified",
+              p."bvnVerified" AS "profile.bvnVerified",
               p.switch AS "profile.switch",
               p.store AS "profile.store",
               p.position AS "profile.position",
-              p.userId AS "profile.userId",
-              p.createdAt AS "profile.createdAt",
-              p.updatedAt AS "profile.updatedAt",
+              p."userId" AS "profile.userId",
+              p."createdAt" AS "profile.createdAt",
+              p."updatedAt" AS "profile.updatedAt",
           
-              IFNULL(ROUND(rs.avgValue, 1), 0) AS avgRating,
-              IFNULL(rs.numRatings, 0) AS numRatings,
+              COALESCE(ROUND(rs."avgValue"::numeric, 1), 0) AS "avgRating",
+              COALESCE(rs."numRatings", 0) AS "numRatings",
           
               (
                 (
-                  ( (IFNULL(rs.avgValue, 0) / 5)
-                    + (POW(1.96,2) / (2 * rs.numRatings))
+                  ( (COALESCE(rs."avgValue", 0) / 5)
+                    + (POW(1.96,2) / (2 * rs."numRatings"))
                     - 1.96 * SQRT((
-                        ( (IFNULL(rs.avgValue, 0) / 5)
-                          * (1 - (IFNULL(rs.avgValue, 0) / 5))
-                        + POW(1.96,2) / (4 * rs.numRatings)
-                      ) / rs.numRatings))
-                  ) / (1 + POW(1.96,2)/rs.numRatings)
+                        ( (COALESCE(rs."avgValue", 0) / 5)
+                          * (1 - (COALESCE(rs."avgValue", 0) / 5))
+                        + POW(1.96,2) / (4 * rs."numRatings")
+                      ) / rs."numRatings"))
+                  ) / (1 + POW(1.96,2)/rs."numRatings")
                 ) * 5
-              ) AS wilsonScore
+              ) AS "wilsonScore"
           
             FROM users u
-            LEFT JOIN profiles p ON u.id = p.userId
-            LEFT JOIN rating_stats rs ON rs.professionalUserId = u.id
+            LEFT JOIN profiles p ON u.id = p."userId"
+            LEFT JOIN rating_stats rs ON rs."professionalUserId" = u.id
             WHERE u.role IN ('professional', 'delivery')
-            ORDER BY wilsonScore DESC
+            ORDER BY "wilsonScore" DESC
             LIMIT ${limit} OFFSET ${(page - 1) * limit}
-          `, {
-            type: QueryTypes.SELECT
-        });
+          `);
 
 
         const nestedData = topPerformers.map(nestFlatKeys);
@@ -256,22 +229,3 @@ export const getTopPerformers = async (req: Request, res: Response) => {
         return errorResponse(res, 'error', 'Something went wrong')
     }
 }
-
-// export const getMetrics = async (req: Request, res: Response) => {
-//     app.get("/metrics", async (req: Request, res: Response) => {
-        
-//     });
-    
-//     try {
-//         const [rows]: any = await db.query("SHOW STATUS LIKE 'Threads_connected'");
-//         if (rows && rows.length > 0) {
-//             dbConnectionsGauge.set(parseInt(rows[0].Value, 10));
-//         }
-
-//         res.set("Content-Type", register.contentType);
-//         res.end(await register.metrics());
-//     } catch (err) {
-//         console.error("Error gathering metrics:", err);
-//         res.status(500).send("Error gathering metrics");
-//     }
-// }

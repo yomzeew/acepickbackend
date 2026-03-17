@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { Account } from "../models/Models";
+import prisma from "../config/prisma";
 import config from "../config/configSetup";
 import axios from "axios";
 import { errorResponse, handleResponse, successResponse } from "../utils/modules";
@@ -32,7 +32,7 @@ export const addAccount = async (req: Request, res: Response) => {
 
     const { accountName, bank, bankCode, accountNumber } = result.data;
 
-    const existingAccount = await Account.findOne({ where: { number: accountNumber } });
+    const existingAccount = await prisma.account.findFirst({ where: { number: accountNumber } });
 
     if (existingAccount) {
         return handleResponse(res, 400, false, 'Account already exists');
@@ -57,13 +57,15 @@ export const addAccount = async (req: Request, res: Response) => {
 
     const { data } = response.data;
 
-    const account = await Account.create({
-        userId: id,
-        name: accountName,
-        bank: bank,
-        number: accountNumber,
-        recipientCode: data.recipient_code,
-        currency: data.currency,
+    const account = await prisma.account.create({
+        data: {
+            userId: id,
+            name: accountName,
+            bank: bank,
+            number: accountNumber,
+            recipientCode: data.recipient_code,
+            currency: data.currency,
+        }
     })
 
     return successResponse(res, 'success', account);
@@ -74,9 +76,9 @@ export const getAccounts = async (req: Request, res: Response) => {
     try {
         const { id } = req.user;
 
-        const accounts = await Account.findAll({
+        const accounts = await prisma.account.findMany({
             where: { userId: id },
-            order: [['createdAt', 'DESC']]
+            orderBy: { createdAt: 'desc' }
         });
 
         return successResponse(res, 'success', accounts);
@@ -119,7 +121,7 @@ export const updateAccount = async (req: Request, res: Response) => {
     const { name } = req.body;
 
     try {
-        const account = await Account.findOne({ where: { recipientCode } });
+        const account = await prisma.account.findFirst({ where: { recipientCode } });
 
         if (!account) {
             return handleResponse(res, 404, false, 'Account not found')
@@ -133,11 +135,12 @@ export const updateAccount = async (req: Request, res: Response) => {
         });
 
         if (response.data.status) {
-            account.name = name
+            const updated = await prisma.account.update({
+                where: { id: account.id },
+                data: { name }
+            });
 
-            await account.save();
-
-            return successResponse(res, 'success', account);
+            return successResponse(res, 'success', updated);
         }
     } catch (error) {
         return errorResponse(res, 'error', error);
@@ -150,7 +153,7 @@ export const deleteAccount = async (req: Request, res: Response) => {
 
     const { recipientCode } = req.params;
 
-    const account = await Account.findOne({ where: { userId: id, recipientCode } });
+    const account = await prisma.account.findFirst({ where: { userId: id, recipientCode } });
 
     try {
         if (!account) {
@@ -164,7 +167,7 @@ export const deleteAccount = async (req: Request, res: Response) => {
         })
 
         if (response.data.status) {
-            await account.destroy();
+            await prisma.account.delete({ where: { id: account.id } });
 
             return successResponse(res, 'success', response.data);
         }

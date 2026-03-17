@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Professional, User } from '../../models/Models';
+import prisma from '../../config/prisma';
 import { handleResponse, successResponse } from '../../utils/modules';
 import { UserStatus } from '../../utils/enum';
 import { deactivatedUserEmail, reactivatedUserEmail, suspendedUserEmail } from '../../utils/messages';
@@ -9,7 +9,7 @@ export const deactivateUser = async (req: Request, res: Response) => {
     try {
         const { userId } = req.params;
 
-        const user = await User.findByPk(userId);
+        const user = await prisma.user.findUnique({ where: { id: userId } });
 
         if (!user) {
             return handleResponse(res, 404, false, 'User not found');
@@ -19,15 +19,13 @@ export const deactivateUser = async (req: Request, res: Response) => {
             return handleResponse(res, 400, false, 'Only active users can be deactivated');
         }
 
-        user.status = UserStatus.INACTIVE;
-
-        await user.save();
+        const updated = await prisma.user.update({ where: { id: userId }, data: { status: UserStatus.INACTIVE as any } });
 
         //send email to user notifying them of deactivation
-        const emailMsg = deactivatedUserEmail(user);
+        const emailMsg = deactivatedUserEmail(updated);
 
         const { messageId, success } = await sendEmail(
-            user.email,
+            updated.email,
             emailMsg.title,
             emailMsg.body,
             'User'
@@ -44,7 +42,7 @@ export const suspendUser = async (req: Request, res: Response) => {
     try {
         const { userId } = req.params;
 
-        const user = await User.findByPk(userId);
+        const user = await prisma.user.findUnique({ where: { id: userId } });
 
         if (!user) {
             return handleResponse(res, 404, false, 'User not found');
@@ -54,15 +52,13 @@ export const suspendUser = async (req: Request, res: Response) => {
             return handleResponse(res, 400, false, 'Only active users can be suspended');
         }
 
-        user.status = UserStatus.SUSPENDED;
-
-        await user.save();
+        const updated = await prisma.user.update({ where: { id: userId }, data: { status: UserStatus.SUSPENDED as any } });
 
         //send email to user notifying them of suspension
-        const emailMsg = suspendedUserEmail(user);
+        const emailMsg = suspendedUserEmail(updated);
 
         const { messageId, success } = await sendEmail(
-            user.email,
+            updated.email,
             emailMsg.title,
             emailMsg.body,
             'User'
@@ -80,7 +76,7 @@ export const reactivateUser = async (req: Request, res: Response) => {
     try {
         const { userId } = req.params;
 
-        const user = await User.findByPk(userId);
+        const user = await prisma.user.findUnique({ where: { id: userId } });
 
         if (!user) {
             return handleResponse(res, 404, false, 'User not found');
@@ -90,15 +86,13 @@ export const reactivateUser = async (req: Request, res: Response) => {
             return handleResponse(res, 400, false, 'User is already active');
         }
 
-        user.status = UserStatus.ACTIVE;
-
-        await user.save();
+        const updated = await prisma.user.update({ where: { id: userId }, data: { status: UserStatus.ACTIVE as any } });
 
         //send email to user notifying them of reactivation
-        const emailMsg = reactivatedUserEmail(user);
+        const emailMsg = reactivatedUserEmail(updated);
 
         const { messageId, success } = await sendEmail(
-            user.email,
+            updated.email,
             emailMsg.title,
             emailMsg.body,
             'User'

@@ -8,18 +8,20 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTransactionById = exports.getAllTransactions = void 0;
-const Transaction_1 = require("../models/Transaction");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
-const Job_1 = require("../models/Job");
 const getAllTransactions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id, role } = req.user;
     try {
-        const transactions = yield Transaction_1.Transaction.findAll({
+        const transactions = yield prisma_1.default.transaction.findMany({
             where: { userId: id },
-            include: [Job_1.Job],
-            order: [['createdAt', 'DESC']]
+            include: { job: true },
+            orderBy: { createdAt: 'desc' }
         });
         return (0, modules_1.successResponse)(res, 'success', transactions);
     }
@@ -31,7 +33,7 @@ exports.getAllTransactions = getAllTransactions;
 const getTransactionById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
-        const transaction = yield Transaction_1.Transaction.findOne({ where: { id } });
+        const transaction = yield prisma_1.default.transaction.findUnique({ where: { id: Number(id) } });
         if (!transaction) {
             return (0, modules_1.errorResponse)(res, 'error', 'Transaction not found');
         }

@@ -8,67 +8,69 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUsers = exports.updateProfile = exports.UserAccountInfo = exports.MyAccountInfo = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
 const body_1 = require("../validation/body");
-const sequelize_1 = require("sequelize");
 const query_1 = require("../validation/query");
+const fullProfileInclude = {
+    user: {
+        select: {
+            id: true,
+            email: true,
+            phone: true,
+            status: true,
+            role: true,
+            agreed: true,
+            createdAt: true,
+            updatedAt: true,
+            location: true,
+            wallet: {
+                select: {
+                    id: true,
+                    previousBalance: true,
+                    currentBalance: true,
+                    currency: true,
+                    status: true,
+                    userId: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    pin: true,
+                }
+            },
+            rider: true,
+        }
+    },
+    professional: {
+        include: {
+            profession: {
+                include: { sector: true }
+            }
+        }
+    },
+    cooperation: true,
+    education: true,
+    certifications: true,
+    experience: true,
+    portfolios: true,
+};
 const MyAccountInfo = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     const { id } = req.user;
     try {
-        const profile = yield Models_1.Profile.findOne({
+        const profile = yield prisma_1.default.profile.findFirst({
             where: { userId: id },
-            attributes: {
-                exclude: []
-            },
-            include: [
-                {
-                    model: Models_1.User,
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [
-                        {
-                            model: Models_1.Location,
-                            //attributes: ['country', 'state', 'city', 'address']
-                        },
-                        {
-                            model: Models_1.Wallet,
-                            attributes: { exclude: ['pin'] }
-                        },
-                        {
-                            model: Models_1.Rider
-                        }
-                    ]
-                },
-                {
-                    model: Models_1.Professional,
-                    include: [{
-                            model: Models_1.Profession,
-                            include: [Models_1.Sector]
-                        }]
-                },
-                {
-                    model: Models_1.Cooperation,
-                },
-                {
-                    model: Models_1.Education
-                },
-                {
-                    model: Models_1.Certification
-                },
-                {
-                    model: Models_1.Experience
-                },
-                {
-                    model: Models_1.Portfolio,
-                }
-            ],
+            include: fullProfileInclude,
         });
         if (!profile)
             return (0, modules_1.errorResponse)(res, "Failed", { status: false, message: "Profile Does'nt exist" });
-        profile.user.wallet.setDataValue('isActive', profile.user.wallet.pin !== null);
-        return (0, modules_1.successResponse)(res, "Successful", profile);
+        const walletPin = (_b = (_a = profile.user) === null || _a === void 0 ? void 0 : _a.wallet) === null || _b === void 0 ? void 0 : _b.pin;
+        const result = Object.assign(Object.assign({}, profile), { user: Object.assign(Object.assign({}, profile.user), { wallet: ((_c = profile.user) === null || _c === void 0 ? void 0 : _c.wallet) ? Object.assign(Object.assign({}, profile.user.wallet), { pin: undefined, isActive: walletPin !== null }) : null }) });
+        return (0, modules_1.successResponse)(res, "Successful", result);
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, "Failed", { error: error === null || error === void 0 ? void 0 : error.message });
@@ -76,61 +78,18 @@ const MyAccountInfo = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 });
 exports.MyAccountInfo = MyAccountInfo;
 const UserAccountInfo = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     const { userId } = req.params;
     try {
-        const profile = yield Models_1.Profile.findOne({
+        const profile = yield prisma_1.default.profile.findFirst({
             where: { userId: userId },
-            attributes: {
-                exclude: []
-            },
-            include: [
-                {
-                    model: Models_1.User,
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [
-                        {
-                            model: Models_1.Location,
-                            //attributes: ['country', 'state', 'city', 'address']
-                        },
-                        {
-                            model: Models_1.Wallet,
-                            attributes: {
-                                exclude: ['pin']
-                            },
-                        },
-                        {
-                            model: Models_1.Rider
-                        }
-                    ]
-                },
-                {
-                    model: Models_1.Professional,
-                    include: [{
-                            model: Models_1.Profession,
-                            include: [Models_1.Sector]
-                        }]
-                },
-                {
-                    model: Models_1.Cooperation,
-                },
-                {
-                    model: Models_1.Education
-                },
-                {
-                    model: Models_1.Certification
-                },
-                {
-                    model: Models_1.Experience
-                },
-                {
-                    model: Models_1.Portfolio,
-                }
-            ],
+            include: fullProfileInclude,
         });
         if (!profile)
             return (0, modules_1.errorResponse)(res, "Failed", { status: false, message: "Profile Does'nt exist" });
-        profile.user.wallet.setDataValue('isActive', profile.user.wallet.pin !== null);
-        return (0, modules_1.successResponse)(res, "Successful", profile);
+        const walletPin = (_b = (_a = profile.user) === null || _a === void 0 ? void 0 : _a.wallet) === null || _b === void 0 ? void 0 : _b.pin;
+        const result = Object.assign(Object.assign({}, profile), { user: Object.assign(Object.assign({}, profile.user), { wallet: ((_c = profile.user) === null || _c === void 0 ? void 0 : _c.wallet) ? Object.assign(Object.assign({}, profile.user.wallet), { pin: undefined, isActive: walletPin !== null }) : null }) });
+        return (0, modules_1.successResponse)(res, "Successful", result);
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, "Failed", error);
@@ -151,24 +110,36 @@ const updateProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     try {
         // console.log(req.user);
         if (bio) {
-            const updated = yield Models_1.Profile.update(bio, {
-                where: { userId: id }
+            yield prisma_1.default.profile.updateMany({
+                where: { userId: id },
+                data: bio
             });
         }
         if (contact) {
-            const updated = yield Models_1.User.update(contact, {
-                where: { id }
+            yield prisma_1.default.user.update({
+                where: { id },
+                data: contact
             });
         }
         if (location) {
-            const updated = yield Models_1.Location.update(location, {
-                where: { userId: id }
-            });
+            const existingLocation = yield prisma_1.default.location.findFirst({ where: { userId: id } });
+            if (existingLocation) {
+                yield prisma_1.default.location.update({
+                    where: { id: existingLocation.id },
+                    data: location
+                });
+            }
+            else {
+                yield prisma_1.default.location.create({
+                    data: Object.assign(Object.assign({}, location), { userId: id })
+                });
+            }
         }
         return (0, modules_1.successResponse)(res, "success", "Profile updated successfully");
     }
     catch (error) {
-        return (0, modules_1.errorResponse)(res, "Failed", error);
+        console.error("Profile update error:", (error === null || error === void 0 ? void 0 : error.message) || error);
+        return (0, modules_1.errorResponse)(res, "Failed", (error === null || error === void 0 ? void 0 : error.message) || error);
     }
 });
 exports.updateProfile = updateProfile;
@@ -185,42 +156,49 @@ const getUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     console.log(result.data);
     const { search, professionId, page, limit, role } = result.data;
     try {
-        const contacts = yield Models_1.User.findAll({
-            attributes: { exclude: ['password'] },
-            where: Object.assign(Object.assign({}, (role && { role })), { id: { [sequelize_1.Op.ne]: id } }),
-            include: [
-                {
-                    model: Models_1.Profile,
-                    where: search
-                        ? {
-                            [sequelize_1.Op.or]: [
-                                { firstName: { [sequelize_1.Op.like]: `%${search}%` } },
-                                { lastName: { [sequelize_1.Op.like]: `%${search}%` } },
-                            ],
-                        }
-                        : undefined,
-                    include: [
-                        {
-                            model: Models_1.Professional,
-                            include: [
-                                {
-                                    model: Models_1.Profession,
-                                    where: professionId ? { id: professionId } : undefined,
-                                },
-                            ],
-                        },
+        const contacts = yield prisma_1.default.user.findMany({
+            where: Object.assign(Object.assign(Object.assign({}, (role && { role: role })), { id: { not: id }, profile: search
+                    ? {
+                        OR: [
+                            { firstName: { contains: search, mode: 'insensitive' } },
+                            { lastName: { contains: search, mode: 'insensitive' } },
+                        ],
+                    }
+                    : undefined }), (professionId && {
+                profile: Object.assign(Object.assign({}, (search ? {
+                    OR: [
+                        { firstName: { contains: search, mode: 'insensitive' } },
+                        { lastName: { contains: search, mode: 'insensitive' } },
                     ],
+                } : {})), { professional: {
+                        professionId: Number(professionId),
+                    } }),
+            })),
+            select: {
+                id: true,
+                email: true,
+                phone: true,
+                status: true,
+                role: true,
+                agreed: true,
+                fcmToken: true,
+                createdAt: true,
+                updatedAt: true,
+                profile: {
+                    include: {
+                        professional: {
+                            include: {
+                                profession: true,
+                            },
+                        },
+                    },
                 },
-                {
-                    model: Models_1.Location
-                },
-                {
-                    model: Models_1.OnlineUser
-                }
-            ],
-            limit: limit,
-            offset: (page - 1) * limit,
-            order: [['createdAt', 'DESC']],
+                location: true,
+                onlineUser: true,
+            },
+            take: limit,
+            skip: (page - 1) * limit,
+            orderBy: { createdAt: 'desc' },
         });
         return (0, modules_1.successResponse)(res, 'success', contacts);
     }

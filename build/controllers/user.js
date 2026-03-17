@@ -8,17 +8,22 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUser = void 0;
-const User_1 = require("../models/User");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
-const Profile_1 = require("../models/Profile");
 const getUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const user = yield User_1.User.findByPk(req.params.id, {
-            attributes: { exclude: ['password'] },
-            include: Profile_1.Profile
+        const user = yield prisma_1.default.user.findUnique({
+            where: { id: req.params.id },
+            include: { profile: true }
         });
+        if (user) {
+            user.password = null;
+        }
         return (0, modules_1.successResponse)(res, 'success', user);
     }
     catch (error) {

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.EntryCategory = exports.CommissionScope = exports.CommissionType = exports.Accounts = exports.RiderStatus = exports.VehicleType = exports.TransactionDescription = exports.OrderStatus = exports.OrderMethod = exports.ProductTransactionStatus = exports.ENV = exports.ProductStatus = exports.TransferStatus = exports.TransactionType = exports.TransactionStatus = exports.PaidFor = exports.JobStatus = exports.PayStatus = exports.JobMode = exports.UserState = exports.UserStatus = exports.UserRole = exports.VerificationType = exports.OTPReason = void 0;
+exports.NotificationType = exports.EntryCategory = exports.CommissionScope = exports.CommissionType = exports.Accounts = exports.RiderStatus = exports.VehicleType = exports.TransactionDescription = exports.OrderStatus = exports.OrderMethod = exports.ProductTransactionStatus = exports.ENV = exports.ProductStatus = exports.TransferStatus = exports.TransactionType = exports.TransactionStatus = exports.PaidFor = exports.JobStatus = exports.ActivityStatus = exports.PayStatus = exports.JobMode = exports.UserState = exports.UserStatus = exports.UserRole = exports.VerificationType = exports.OTPReason = void 0;
 var OTPReason;
 (function (OTPReason) {
     OTPReason["VERIFICATION"] = "verification";
@@ -48,6 +48,12 @@ var PayStatus;
     PayStatus["REFUNDED"] = "refunded";
     PayStatus["RELEASED"] = "released";
 })(PayStatus || (exports.PayStatus = PayStatus = {}));
+var ActivityStatus;
+(function (ActivityStatus) {
+    ActivityStatus["ACT_SUCCESS"] = "act_success";
+    ActivityStatus["ACT_FAILED"] = "act_failed";
+    ActivityStatus["ACT_PENDING"] = "act_pending";
+})(ActivityStatus || (exports.ActivityStatus = ActivityStatus = {}));
 var JobStatus;
 (function (JobStatus) {
     JobStatus["COMPLETED"] = "COMPLETED";
@@ -109,13 +115,18 @@ var OrderStatus;
     OrderStatus["PENDING"] = "pending";
     OrderStatus["PAID"] = "paid";
     OrderStatus["ACCEPTED"] = "accepted";
+    OrderStatus["EN_ROUTE_TO_PICKUP"] = "en_route_to_pickup";
+    OrderStatus["ARRIVED_AT_PICKUP"] = "arrived_at_pickup";
     OrderStatus["PICKED_UP"] = "picked_up";
     OrderStatus["CONFIRM_PICKUP"] = "confirm_pickup";
     OrderStatus["IN_TRANSIT"] = "in_transit";
+    OrderStatus["ARRIVED_AT_DROPOFF"] = "arrived_at_dropoff";
     OrderStatus["DELIVERED"] = "delivered";
     OrderStatus["CONFIRM_DELIVERY"] = "confirm_delivery";
     OrderStatus["CANCELLED"] = "cancelled";
     OrderStatus["DISPUTED"] = "disputed";
+    OrderStatus["EXPIRED"] = "expired";
+    OrderStatus["NOT_REQUIRED"] = "not_required";
 })(OrderStatus || (exports.OrderStatus = OrderStatus = {}));
 var TransactionDescription;
 (function (TransactionDescription) {
@@ -165,3 +176,12 @@ var EntryCategory;
     EntryCategory["PRODUCT"] = "product";
     EntryCategory["DELIVERY"] = "delivery";
 })(EntryCategory || (exports.EntryCategory = EntryCategory = {}));
+var NotificationType;
+(function (NotificationType) {
+    NotificationType["JOB"] = "job";
+    NotificationType["ORDER"] = "order";
+    NotificationType["PAYMENT"] = "payment";
+    NotificationType["CHAT"] = "chat";
+    NotificationType["SYSTEM"] = "system";
+    NotificationType["PROFILE"] = "profile";
+})(NotificationType || (exports.NotificationType = NotificationType = {}));

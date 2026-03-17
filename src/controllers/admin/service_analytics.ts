@@ -1,50 +1,18 @@
 import { Request, Response } from "express"
-import { Job } from "../../models/Job"
+import prisma from "../../config/prisma";
 import { JobStatus, OrderStatus } from "../../utils/enum";
 import { errorResponse, successResponse } from "../../utils/modules";
-import { Order, Rating } from "../../models/Models";
-import sequelize from "../../config/db";
 
 export const getJobStats = async (req: Request, res: Response) => {
     console.log("Fetching job statistics...");
     try {
-        const totalJobs = await Job.count();
-
-        const pendingJobs = await Job.count({
-            where: {
-                status: JobStatus.PENDING
-            }
-        });
-
-        const ongoingJobs = await Job.count({
-            where: {
-                status: JobStatus.ONGOING
-            }
-        });
-
-        const completedJobs = await Job.count({
-            where: {
-                status: JobStatus.COMPLETED
-            }
-        });
-
-        const rejectedJobs = await Job.count({
-            where: {
-                status: JobStatus.REJECTED
-            }
-        });
-
-        const approvedJobs = await Job.count({
-            where: {
-                status: JobStatus.APPROVED
-            }
-        });
-
-        const disputedJobs = await Job.count({
-            where: {
-                status: JobStatus.DISPUTED
-            }
-        });
+        const totalJobs = await prisma.job.count();
+        const pendingJobs = await prisma.job.count({ where: { status: JobStatus.PENDING as any } });
+        const ongoingJobs = await prisma.job.count({ where: { status: JobStatus.ONGOING as any } });
+        const completedJobs = await prisma.job.count({ where: { status: JobStatus.COMPLETED as any } });
+        const rejectedJobs = await prisma.job.count({ where: { status: JobStatus.REJECTED as any } });
+        const approvedJobs = await prisma.job.count({ where: { status: JobStatus.APPROVED as any } });
+        const disputedJobs = await prisma.job.count({ where: { status: JobStatus.DISPUTED as any } });
 
         return successResponse(res, 'success', {
             totalJobs,
@@ -63,16 +31,17 @@ export const getJobStats = async (req: Request, res: Response) => {
 
 export const avgRating = async (req: Request, res: Response) => {
     try {
-        const avgRating = await Rating.findOne({
-            attributes: [[sequelize.fn('AVG', sequelize.col('value')), 'avgRating']],
-            raw: true,
+        const ratingAgg = await prisma.rating.aggregate({
+            _avg: { value: true }
         });
 
-        if (!avgRating || !avgRating.avgRating) {
+        const avg = ratingAgg._avg.value;
+
+        if (!avg) {
             return successResponse(res, 'success', { avgRating: 0 });
         }
 
-        return successResponse(res, 'success', { avgRating: parseFloat(Number(avgRating.avgRating).toFixed(2)) });
+        return successResponse(res, 'success', { avgRating: parseFloat(Number(avg).toFixed(2)) });
     } catch (error) {
         console.log(error);
         return errorResponse(res, 'error', 'Internal server error');
@@ -81,55 +50,15 @@ export const avgRating = async (req: Request, res: Response) => {
 
 export const getOrderStats = async (req: Request, res: Response) => {
     try {
-        const totalOrders = await Order.count();
-
-        const pendingOrders = await Order.count({
-            where: {
-                status: OrderStatus.PENDING
-            }
-        })
-
-        const acceptedOrders = await Order.count({
-            where: {
-                status: OrderStatus.ACCEPTED
-            }
-        })
-
-        const paidOrders = await Order.count({
-            where: {
-                status: OrderStatus.PAID
-            }
-        })
-
-        const pickedUpOrders = await Order.count({
-            where: {
-                status: OrderStatus.PICKED_UP
-            }
-        })
-
-        const inTransitOrders = await Order.count({
-            where: {
-                status: OrderStatus.IN_TRANSIT
-            }
-        })
-
-        const deliveredOrders = await Order.count({
-            where: {
-                status: OrderStatus.DELIVERED
-            }
-        })
-
-        const confirmedDeliveryOrders = await Order.count({
-            where: {
-                status: OrderStatus.CONFIRM_DELIVERY
-            }
-        })
-
-        const cancelledOrders = await Order.count({
-            where: {
-                status: OrderStatus.CANCELLED
-            }
-        })
+        const totalOrders = await prisma.order.count();
+        const pendingOrders = await prisma.order.count({ where: { status: OrderStatus.PENDING as any } });
+        const acceptedOrders = await prisma.order.count({ where: { status: OrderStatus.ACCEPTED as any } });
+        const paidOrders = await prisma.order.count({ where: { status: OrderStatus.PAID as any } });
+        const pickedUpOrders = await prisma.order.count({ where: { status: OrderStatus.PICKED_UP as any } });
+        const inTransitOrders = await prisma.order.count({ where: { status: OrderStatus.IN_TRANSIT as any } });
+        const deliveredOrders = await prisma.order.count({ where: { status: OrderStatus.DELIVERED as any } });
+        const confirmedDeliveryOrders = await prisma.order.count({ where: { status: OrderStatus.CONFIRM_DELIVERY as any } });
+        const cancelledOrders = await prisma.order.count({ where: { status: OrderStatus.CANCELLED as any } });
 
         return successResponse(res, 'success', {
             totalOrders,

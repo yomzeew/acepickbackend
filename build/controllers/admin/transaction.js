@@ -8,49 +8,36 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAllTransactions = exports.transactionStat = void 0;
-const Models_1 = require("../../models/Models");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const enum_1 = require("../../utils/enum");
 const modules_1 = require("../../utils/modules");
 const query_1 = require("../../validation/query");
 const transactionStat = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const totalTransactions = yield Models_1.Transaction.count();
-        const successfulTransactions = yield Models_1.Transaction.count({
-            where: {
-                status: enum_1.TransactionStatus.SUCCESS
-            }
+        const totalTransactions = yield prisma_1.default.transaction.count();
+        const successfulTransactions = yield prisma_1.default.transaction.count({ where: { status: enum_1.TransactionStatus.SUCCESS } });
+        const failedTransactions = yield prisma_1.default.transaction.count({ where: { status: enum_1.TransactionStatus.FAILED } });
+        const pendingTransactions = yield prisma_1.default.transaction.count({ where: { status: enum_1.TransactionStatus.PENDING } });
+        const inboundAgg = yield prisma_1.default.transaction.aggregate({
+            where: { type: enum_1.TransactionType.CREDIT, status: enum_1.TransactionStatus.SUCCESS },
+            _sum: { amount: true }
         });
-        const failedTransactions = yield Models_1.Transaction.count({
-            where: {
-                status: enum_1.TransactionStatus.FAILED
-            }
-        });
-        const pendingTransactions = yield Models_1.Transaction.count({
-            where: {
-                status: enum_1.TransactionStatus.PENDING
-            }
-        });
-        const inboundAmount = yield Models_1.Transaction.sum('amount', {
-            where: {
-                type: enum_1.TransactionType.CREDIT,
-                status: enum_1.TransactionStatus.SUCCESS
-            }
-        });
-        const outboundAmount = yield Models_1.Transaction.sum('amount', {
-            where: {
-                type: enum_1.TransactionType.DEBIT,
-                status: enum_1.TransactionStatus.SUCCESS
-            }
+        const outboundAgg = yield prisma_1.default.transaction.aggregate({
+            where: { type: enum_1.TransactionType.DEBIT, status: enum_1.TransactionStatus.SUCCESS },
+            _sum: { amount: true }
         });
         return (0, modules_1.successResponse)(res, 'success', {
             totalTransactions,
             successfulTransactions,
             failedTransactions,
             pendingTransactions,
-            inboundAmount,
-            outboundAmount
+            inboundAmount: inboundAgg._sum.amount ? Number(inboundAgg._sum.amount) : 0,
+            outboundAmount: outboundAgg._sum.amount ? Number(outboundAgg._sum.amount) : 0
         });
     }
     catch (error) {
@@ -70,11 +57,11 @@ const getAllTransactions = (req, res) => __awaiter(void 0, void 0, void 0, funct
             });
         }
         const { status, page, limit } = result.data;
-        const transactions = yield Models_1.Transaction.findAll({
-            where: status && status !== 'all' ? { status } : {},
-            offset: (page - 1) * limit,
-            limit: limit,
-            order: [['createdAt', 'DESC']]
+        const transactions = yield prisma_1.default.transaction.findMany({
+            where: status && status !== 'all' ? { status: status } : {},
+            skip: (page - 1) * limit,
+            take: limit,
+            orderBy: { createdAt: 'desc' }
         });
         return (0, modules_1.successResponse)(res, 'success', { transactions });
     }

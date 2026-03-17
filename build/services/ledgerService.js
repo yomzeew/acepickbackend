@@ -8,13 +8,28 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LedgerService = void 0;
-const LegderEntry_1 = require("../models/LegderEntry");
+const prisma_1 = __importDefault(require("../config/prisma"));
 class LedgerService {
     static createEntry(entries) {
         return __awaiter(this, void 0, void 0, function* () {
-            const newEntries = yield LegderEntry_1.LedgerEntry.bulkCreate(entries);
+            yield prisma_1.default.ledgerEntry.createMany({
+                data: entries.map(entry => {
+                    var _a, _b;
+                    return ({
+                        transactionId: Number(entry.transactionId),
+                        userId: (_a = entry.userId) !== null && _a !== void 0 ? _a : null,
+                        account: entry.account,
+                        type: entry.type,
+                        amount: Number(entry.amount),
+                        category: ((_b = entry.category) !== null && _b !== void 0 ? _b : null),
+                    });
+                })
+            });
         });
     }
 }

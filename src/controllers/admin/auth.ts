@@ -1,19 +1,13 @@
 import { Request, Response } from 'express'
-import { Profile, User } from '../../models/Models';
+import prisma from '../../config/prisma';
 import { errorResponse, handleResponse, successResponse } from '../../utils/modules';
 import { UserRole } from '../../utils/enum';
-import { Op } from 'sequelize';
 
 export const upgradeUserToAdmin = async (req: Request, res: Response) => {
     const { userId } = req.params;
 
     try {
-        // const user = await User.findByPk(userId);
-
-        // if (!adminRole)
-        //     return handleResponse(res, 404, false, "Admin role not found")
-
-        const user = await User.findByPk(userId);
+        const user = await prisma.user.findUnique({ where: { id: userId } });
 
         if (!user)
             return handleResponse(res, 404, false, "User not found")
@@ -21,9 +15,7 @@ export const upgradeUserToAdmin = async (req: Request, res: Response) => {
         if (user.role === UserRole.ADMIN)
             return handleResponse(res, 400, false, "User is already an admin")
 
-        user.role = UserRole.ADMIN;
-
-        await user.save();
+        await prisma.user.update({ where: { id: userId }, data: { role: UserRole.ADMIN as any } });
 
         return successResponse(res, 'success', 'User upgraded to admin');
     } catch (error) {
@@ -37,7 +29,7 @@ export const removeAdmin = async (req: Request, res: Response) => {
     const { userId } = req.params;
 
     try {
-        const user = await User.findByPk(userId);
+        const user = await prisma.user.findUnique({ where: { id: userId } });
 
         if (!user)
             return handleResponse(res, 404, false, "User not found")
@@ -45,9 +37,7 @@ export const removeAdmin = async (req: Request, res: Response) => {
         if (user.role !== UserRole.ADMIN)
             return handleResponse(res, 400, false, "User is not an admin")
 
-        user.role = UserRole.CLIENT;
-
-        await user.save();
+        await prisma.user.update({ where: { id: userId }, data: { role: UserRole.CLIENT as any } });
 
         return successResponse(res, 'success', 'User removed from admin status')
     } catch (error) {
@@ -59,9 +49,9 @@ export const removeAdmin = async (req: Request, res: Response) => {
 
 export const getAdmins = async (req: Request, res: Response) => {
     try {
-        const admins = await User.findAll({
-            where: { role: UserRole.ADMIN },
-            include: [Profile]
+        const admins = await prisma.user.findMany({
+            where: { role: UserRole.ADMIN as any },
+            include: { profile: true }
         })
 
         return successResponse(res, 'success', admins)

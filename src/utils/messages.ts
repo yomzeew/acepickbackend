@@ -1,12 +1,9 @@
-import { title } from "process"
-import { Dispute, Job, Product, ProductTransaction, User } from "../models/Models"
-
 interface Message {
     title: string,
     body: string
 }
 
-export const registerEmail = (user: User): Message => {
+export const registerEmail = (user: any): Message => {
     return {
         title: "Welcome to Acepick",
         body: `Welcome on board ${user.profile?.firstName} ${user.profile?.lastName},
@@ -65,7 +62,7 @@ export const forgotPasswordEmail = (code: string): Message => {
 }
 
 
-export const jobCreatedEmail = (job: Job): Message => {
+export const jobCreatedEmail = (job: any): Message => {
     return {
         title: `Job created: ${job.title}`,
         body: `You have a new job from ${job.client.profile.firstName} ${job.client.profile.lastName}
@@ -78,7 +75,7 @@ export const jobCreatedEmail = (job: Job): Message => {
     }
 }
 
-export const jobUpdatedEmail = (job: Job): Message => {
+export const jobUpdatedEmail = (job: any): Message => {
     return {
         title: `Job Updated`,
         body: `The job ${job.title} has updated by ${job.client.profile.firstName} ${job.client.profile.lastName}
@@ -90,7 +87,7 @@ export const jobUpdatedEmail = (job: Job): Message => {
     }
 }
 
-export const jobResponseEmail = (job: Job): Message => {
+export const jobResponseEmail = (job: any): Message => {
     const response = job.accepted ? "accepted" : "declined"
 
 
@@ -119,7 +116,7 @@ export const jobResponseEmail = (job: Job): Message => {
 // }
 
 
-export const jobDisputeEmail = (job: Job, dispute: Dispute): Message => {
+export const jobDisputeEmail = (job: any, dispute: any): Message => {
 
     return {
         title: `Job dispute: ${job.title}`,
@@ -133,7 +130,7 @@ export const jobDisputeEmail = (job: Job, dispute: Dispute): Message => {
     }
 }
 
-export const invoiceGeneratedEmail = (job: Job): Message => {
+export const invoiceGeneratedEmail = (job: any): Message => {
 
     return {
         title: `Invoice generated: ${job.title}`,
@@ -151,7 +148,7 @@ export const invoiceGeneratedEmail = (job: Job): Message => {
         `}
 }
 
-export const invoiceUpdatedEmail = (job: Job): Message => {
+export const invoiceUpdatedEmail = (job: any): Message => {
 
     return {
         title: `Invoice updated: ${job.title}`,
@@ -171,7 +168,7 @@ export const invoiceUpdatedEmail = (job: Job): Message => {
     }
 }
 
-export const completeJobEmail = (job: Job) => {
+export const completeJobEmail = (job: any) => {
     return {
         title: `Job Completed`,
         body: `Your job ${job.title} has been completed by ${job.client.profile.firstName} ${job.client.profile.lastName}
@@ -184,7 +181,7 @@ export const completeJobEmail = (job: Job) => {
     }
 }
 
-export const approveJobEmail = (job: Job) => {
+export const approveJobEmail = (job: any) => {
     return {
         title: `Job Approved`,
         body: `Your job ${job.title} has been approved by ${job.professional.profile.firstName} ${job.professional.profile.lastName}
@@ -197,7 +194,7 @@ export const approveJobEmail = (job: Job) => {
 }
 
 
-export const disputedJobEmail = (job: Job, dispute: Dispute) => {
+export const disputedJobEmail = (job: any, dispute: any) => {
     return {
         title: `Job Disputed`,
         body: `Your job ${job.title} has been disputed by ${job.client.profile.firstName} ${job.client.profile.lastName}
@@ -213,7 +210,7 @@ export const disputedJobEmail = (job: Job, dispute: Dispute) => {
     }
 }
 
-export const jobPaymentEmail = (job: Job) => {
+export const jobPaymentEmail = (job: any) => {
     return {
         title: `Job Payment`,
         body: `Your job ${job.title} has been paid by ${job.client.profile.firstName} ${job.client.profile.lastName}
@@ -225,7 +222,7 @@ export const jobPaymentEmail = (job: Job) => {
     }
 }
 
-export const productPaymentEmail = (productTrans: ProductTransaction) => {
+export const productPaymentEmail = (productTrans: any) => {
     return {
         title: `Product Payment`,
         body: `Your Product - ${productTrans.product.name} has been paid by ${productTrans.buyer.profile.firstName} ${productTrans.buyer.profile.lastName}
@@ -240,7 +237,7 @@ export const productPaymentEmail = (productTrans: ProductTransaction) => {
     }
 }
 
-export const jobCancelledEmail = (job: Job) => {
+export const jobCancelledEmail = (job: any) => {
     return {
         title: `Job Cancelled`,
         body: `Your job ${job.title} has been cancelled by ${job.client.profile.firstName} ${job.client.profile.lastName}
@@ -253,7 +250,7 @@ export const jobCancelledEmail = (job: Job) => {
 }
 
 
-export const suspendUserEmail = (user: User) => {
+export const suspendUserEmail = (user: any) => {
     return {
         title: `Account Suspended`,
         body: `Your account has been temporarily suspended by the admin due to violation of the terms and conditions
@@ -262,7 +259,7 @@ export const suspendUserEmail = (user: User) => {
     }
 }
 
-export const reactivateUserEmail = (user: User) => {
+export const reactivateUserEmail = (user: any) => {
     return {
         title: `Account Activated`,
         body: `Your account has been re-activated by the admin. You can now log in and start using the platform.
@@ -270,7 +267,7 @@ export const reactivateUserEmail = (user: User) => {
     }
 }
 
-export const approveProductEmail = (product: Product) => {
+export const approveProductEmail = (product: any) => {
     return {
         title: `Product Approved`,
         body: `Your product <b>${product.name}</b> has been approved by the admin. It is now available for purchase.
@@ -282,7 +279,7 @@ export const approveProductEmail = (product: Product) => {
     }
 }
 
-export const rejectProductEmail = (product: Product) => {
+export const rejectProductEmail = (product: any) => {
     return {
         title: `Product Rejected`,
         body: `Your product <b>${product.name}</b> has been rejected by the admin. Please review your product and resubmit for approval.
@@ -292,28 +289,28 @@ export const rejectProductEmail = (product: Product) => {
              `}
 }
 
-export const deactivatedUserEmail = (user: User) => {
+export const deactivatedUserEmail = (user: any) => {
     return {
         title: `Account Deactivated`,
         body: `Your account has been deactivated by the admin. Please contact the admin for more information.`
     }
 }
 
-export const suspendedUserEmail = (user: User) => {
+export const suspendedUserEmail = (user: any) => {
     return {
         title: `Account Suspended`,
         body: `Your account has been suspended by the admin. Please contact the admin for more information.`
     }
 }
 
-export const reactivatedUserEmail = (user: User) => {
+export const reactivatedUserEmail = (user: any) => {
     return {
         title: `Account Reactivated`,
         body: `Your account has been reactivated by the admin. You can now log in and start using the platform.`
     }
 }
 
-export const disputedOrderEmail = (productTrans: ProductTransaction, dispute: Dispute) => {
+export const disputedOrderEmail = (productTrans: any, dispute: any) => {
     return {
         title: `Dispute Created`,
         body: `A dispute has been created for your order with the product <b>${productTrans.product.name}</b>. Please review the dispute and take appropriate action.<br><br>
@@ -331,7 +328,7 @@ export const disputedOrderEmail = (productTrans: ProductTransaction, dispute: Di
     }
 }
 
-export const resolveDisputeEmail = (dispute: Dispute) => {
+export const resolveDisputeEmail = (dispute: any) => {
     return {
         title: "Dispute resolved",
         body: `

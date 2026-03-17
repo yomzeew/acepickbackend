@@ -13,22 +13,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.revenueOverview = exports.getMonthlyRevenueByCategory = exports.getRevenueByCategory = exports.getMonthlyRevenueWithCumulative = exports.getMonthlyRevenue = void 0;
-const db_1 = __importDefault(require("../../config/db"));
-const sequelize_1 = require("sequelize");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const modules_1 = require("../../utils/modules");
-const LegderEntry_1 = require("../../models/LegderEntry");
 const getMonthlyRevenue = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const results = yield db_1.default.query(`
-        SELECT
-            YEAR(createdAt) AS year,
-            MONTH(createdAt) AS month,
-            SUM(amount) AS monthly_revenue
-        FROM ledger_entries
-        WHERE account = 'platform_revenue'
-        GROUP BY YEAR(createdAt), MONTH(createdAt)
-        ORDER BY year, month;
-        `, { type: sequelize_1.QueryTypes.SELECT });
+        const results = yield prisma_1.default.$queryRawUnsafe(`
+            SELECT
+                EXTRACT(YEAR FROM "createdAt") AS year,
+                EXTRACT(MONTH FROM "createdAt") AS month,
+                SUM(amount) AS monthly_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt")
+            ORDER BY year, month;
+        `);
         return (0, modules_1.successResponse)(res, 'success', results);
     }
     catch (error) {
@@ -39,19 +37,19 @@ const getMonthlyRevenue = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.getMonthlyRevenue = getMonthlyRevenue;
 const getMonthlyRevenueWithCumulative = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const results = yield db_1.default.query(`
-          SELECT
-              YEAR(createdAt) AS year,
-              MONTH(createdAt) AS month,
-              SUM(amount) AS monthly_revenue,
-              SUM(SUM(amount)) OVER (
-                  ORDER BY YEAR(createdAt), MONTH(createdAt)
-              ) AS cumulative_revenue
-          FROM ledger_entries
-          WHERE account = 'platform_revenue'
-          GROUP BY YEAR(createdAt), MONTH(createdAt)
-          ORDER BY year, month;
-          `, { type: sequelize_1.QueryTypes.SELECT });
+        const results = yield prisma_1.default.$queryRawUnsafe(`
+            SELECT
+                EXTRACT(YEAR FROM "createdAt") AS year,
+                EXTRACT(MONTH FROM "createdAt") AS month,
+                SUM(amount) AS monthly_revenue,
+                SUM(SUM(amount)) OVER (
+                    ORDER BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt")
+                ) AS cumulative_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt")
+            ORDER BY year, month;
+        `);
         return (0, modules_1.successResponse)(res, 'success', results);
     }
     catch (error) {
@@ -60,19 +58,15 @@ const getMonthlyRevenueWithCumulative = (req, res) => __awaiter(void 0, void 0, 
     }
 });
 exports.getMonthlyRevenueWithCumulative = getMonthlyRevenueWithCumulative;
-// adjust path
 const getRevenueByCategory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const results = yield LegderEntry_1.LedgerEntry.findAll({
-            attributes: [
-                "category",
-                [(0, sequelize_1.fn)("SUM", (0, sequelize_1.col)("amount")), "total_revenue"],
-            ],
-            where: { account: "platform_revenue" },
-            group: ["category"],
-            order: [[(0, sequelize_1.fn)("SUM", (0, sequelize_1.col)("amount")), "DESC"]],
-            raw: true,
-        });
+        const results = yield prisma_1.default.$queryRawUnsafe(`
+            SELECT category, SUM(amount) AS total_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY category
+            ORDER BY total_revenue DESC;
+        `);
         return (0, modules_1.successResponse)(res, 'success', results);
     }
     catch (error) {
@@ -83,26 +77,17 @@ const getRevenueByCategory = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getRevenueByCategory = getRevenueByCategory;
 const getMonthlyRevenueByCategory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const results = yield LegderEntry_1.LedgerEntry.findAll({
-            attributes: [
-                [(0, sequelize_1.fn)("YEAR", (0, sequelize_1.col)("createdAt")), "year"],
-                [(0, sequelize_1.fn)("MONTH", (0, sequelize_1.col)("createdAt")), "month"],
-                "category",
-                [(0, sequelize_1.fn)("SUM", (0, sequelize_1.col)("amount")), "monthly_revenue"],
-            ],
-            where: { account: "platform_revenue" },
-            group: [
-                (0, sequelize_1.fn)("YEAR", (0, sequelize_1.col)("createdAt")),
-                (0, sequelize_1.fn)("MONTH", (0, sequelize_1.col)("createdAt")),
-                "category",
-            ],
-            order: [
-                [(0, sequelize_1.literal)("year"), "ASC"],
-                [(0, sequelize_1.literal)("month"), "ASC"],
-                ["category", "ASC"],
-            ],
-            raw: true,
-        });
+        const results = yield prisma_1.default.$queryRawUnsafe(`
+            SELECT
+                EXTRACT(YEAR FROM "createdAt") AS year,
+                EXTRACT(MONTH FROM "createdAt") AS month,
+                category,
+                SUM(amount) AS monthly_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt"), category
+            ORDER BY year ASC, month ASC, category ASC;
+        `);
         return (0, modules_1.successResponse)(res, 'success', results);
     }
     catch (error) {
@@ -113,19 +98,14 @@ const getMonthlyRevenueByCategory = (req, res) => __awaiter(void 0, void 0, void
 exports.getMonthlyRevenueByCategory = getMonthlyRevenueByCategory;
 const revenueOverview = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const balances = yield LegderEntry_1.LedgerEntry.findAll({
-            attributes: [
-                'account',
-                [
-                    (0, sequelize_1.literal)(`
-            SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) -
-            SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END)
-          `),
-                    'balance'
-                ]
-            ],
-            group: ['account']
-        });
+        const balances = yield prisma_1.default.$queryRawUnsafe(`
+            SELECT
+                account,
+                SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) -
+                SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END) AS balance
+            FROM ledger_entries
+            GROUP BY account;
+        `);
         return (0, modules_1.successResponse)(res, 'success', balances);
     }
     catch (error) {

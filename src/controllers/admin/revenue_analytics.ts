@@ -1,25 +1,19 @@
 import { Request, Response } from "express";
-import sequelize from '../../config/db'
-import { Op, QueryTypes, fn, col, literal } from "sequelize";
+import prisma from "../../config/prisma";
 import { errorResponse, successResponse } from "../../utils/modules";
-import { LedgerEntry } from "../../models/LegderEntry";
-import { Accounts } from "../../utils/enum";
 
 export const getMonthlyRevenue = async (req: Request, res: Response) => {
     try {
-        const results = await sequelize.query(
-            `
-        SELECT
-            YEAR(createdAt) AS year,
-            MONTH(createdAt) AS month,
-            SUM(amount) AS monthly_revenue
-        FROM ledger_entries
-        WHERE account = 'platform_revenue'
-        GROUP BY YEAR(createdAt), MONTH(createdAt)
-        ORDER BY year, month;
-        `,
-            { type: QueryTypes.SELECT }
-        );
+        const results: any[] = await prisma.$queryRawUnsafe(`
+            SELECT
+                EXTRACT(YEAR FROM "createdAt") AS year,
+                EXTRACT(MONTH FROM "createdAt") AS month,
+                SUM(amount) AS monthly_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt")
+            ORDER BY year, month;
+        `);
 
         return successResponse(res, 'success', results);
     } catch (error) {
@@ -31,22 +25,19 @@ export const getMonthlyRevenue = async (req: Request, res: Response) => {
 
 export const getMonthlyRevenueWithCumulative = async (req: Request, res: Response) => {
     try {
-        const results = await sequelize.query(
-            `
-          SELECT
-              YEAR(createdAt) AS year,
-              MONTH(createdAt) AS month,
-              SUM(amount) AS monthly_revenue,
-              SUM(SUM(amount)) OVER (
-                  ORDER BY YEAR(createdAt), MONTH(createdAt)
-              ) AS cumulative_revenue
-          FROM ledger_entries
-          WHERE account = 'platform_revenue'
-          GROUP BY YEAR(createdAt), MONTH(createdAt)
-          ORDER BY year, month;
-          `,
-            { type: QueryTypes.SELECT }
-        );
+        const results: any[] = await prisma.$queryRawUnsafe(`
+            SELECT
+                EXTRACT(YEAR FROM "createdAt") AS year,
+                EXTRACT(MONTH FROM "createdAt") AS month,
+                SUM(amount) AS monthly_revenue,
+                SUM(SUM(amount)) OVER (
+                    ORDER BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt")
+                ) AS cumulative_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt")
+            ORDER BY year, month;
+        `);
 
         return successResponse(res, 'success', results);
     } catch (error) {
@@ -54,20 +45,16 @@ export const getMonthlyRevenueWithCumulative = async (req: Request, res: Respons
         return errorResponse(res, 'error', 'Internal server error');
     }
 };
-// adjust path
 
 export const getRevenueByCategory = async (req: Request, res: Response) => {
     try {
-        const results = await LedgerEntry.findAll({
-            attributes: [
-                "category",
-                [fn("SUM", col("amount")), "total_revenue"],
-            ],
-            where: { account: "platform_revenue" },
-            group: ["category"],
-            order: [[fn("SUM", col("amount")), "DESC"]],
-            raw: true,
-        });
+        const results: any[] = await prisma.$queryRawUnsafe(`
+            SELECT category, SUM(amount) AS total_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY category
+            ORDER BY total_revenue DESC;
+        `);
 
         return successResponse(res, 'success', results);
     } catch (error) {
@@ -79,26 +66,17 @@ export const getRevenueByCategory = async (req: Request, res: Response) => {
 
 export const getMonthlyRevenueByCategory = async (req: Request, res: Response) => {
     try {
-        const results = await LedgerEntry.findAll({
-            attributes: [
-                [fn("YEAR", col("createdAt")), "year"],
-                [fn("MONTH", col("createdAt")), "month"],
-                "category",
-                [fn("SUM", col("amount")), "monthly_revenue"],
-            ],
-            where: { account: "platform_revenue" },
-            group: [
-                fn("YEAR", col("createdAt")),
-                fn("MONTH", col("createdAt")),
-                "category",
-            ],
-            order: [
-                [literal("year"), "ASC"],
-                [literal("month"), "ASC"],
-                ["category", "ASC"],
-            ],
-            raw: true,
-        });
+        const results: any[] = await prisma.$queryRawUnsafe(`
+            SELECT
+                EXTRACT(YEAR FROM "createdAt") AS year,
+                EXTRACT(MONTH FROM "createdAt") AS month,
+                category,
+                SUM(amount) AS monthly_revenue
+            FROM ledger_entries
+            WHERE account = 'platform_revenue'
+            GROUP BY EXTRACT(YEAR FROM "createdAt"), EXTRACT(MONTH FROM "createdAt"), category
+            ORDER BY year ASC, month ASC, category ASC;
+        `);
 
         return successResponse(res, 'success', results);
     } catch (error) {
@@ -109,19 +87,14 @@ export const getMonthlyRevenueByCategory = async (req: Request, res: Response) =
 
 export const revenueOverview = async (req: Request, res: Response) => {
     try {
-        const balances = await LedgerEntry.findAll({
-            attributes: [
-                'account',
-                [
-                    literal(`
-            SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) -
-            SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END)
-          `),
-                    'balance'
-                ]
-            ],
-            group: ['account']
-        });
+        const balances: any[] = await prisma.$queryRawUnsafe(`
+            SELECT
+                account,
+                SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END) -
+                SUM(CASE WHEN type = 'debit' THEN amount ELSE 0 END) AS balance
+            FROM ledger_entries
+            GROUP BY account;
+        `);
 
         return successResponse(res, 'success', balances);
     } catch (error) {
@@ -129,5 +102,4 @@ export const revenueOverview = async (req: Request, res: Response) => {
         return errorResponse(res, 'error', 'Internal server error');
     }
 }
-
 

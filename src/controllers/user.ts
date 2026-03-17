@@ -1,14 +1,17 @@
 import { Request, Response } from 'express'
-import { User } from '../models/User'
+import prisma from '../config/prisma'
 import { errorResponse, successResponse } from '../utils/modules'
-import { Profile } from '../models/Profile'
 
 export const getUser = async (req: Request, res: Response) => {
     try {
-        const user = await User.findByPk(req.params.id, {
-            attributes: { exclude: ['password'] },
-            include: Profile
+        const user = await prisma.user.findUnique({
+            where: { id: req.params.id },
+            include: { profile: true }
         })
+
+        if (user) {
+            (user as any).password = null;
+        }
 
         return successResponse(res, 'success', user);
     } catch (error) {

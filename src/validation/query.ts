@@ -31,6 +31,8 @@ export const getProductSchema = z.object({
     state: z.string().optional(),
     lga: z.string().optional(),
     search: z.string().optional(),
+    minPrice: z.coerce.number().min(0).optional(),
+    maxPrice: z.coerce.number().min(0).optional(),
     page: z.coerce.number().min(1).default(1),
     limit: z.coerce.number().min(1).default(10),
     orderBy: z.enum(['createdAt', 'price', 'name']).optional(),

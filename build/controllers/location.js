@@ -8,91 +8,57 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteLocation = exports.addLocation = exports.getLocationById = exports.getMyLocations = exports.updateLocation = void 0;
-const Models_1 = require("../models/Models");
-const body_1 = require("../validation/body");
+exports.deleteLocation = exports.updateLocation = exports.addLocation = exports.getMyLocations = exports.getLocationById = void 0;
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
-const updateLocation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { locationId } = req.params;
-        if (!locationId || Number.isNaN(Number(locationId))) {
-            return res.status(400).json({
-                error: "Invalid or missing locationId parameter",
-            });
-        }
-        const result = body_1.updateLocationSchema.safeParse(req.body);
-        if (!result.success) {
-            return res.status(400).json({
-                error: "Invalid query parameters",
-                issues: result.error.format(),
-            });
-        }
-        const { latitude, longitude, address, lga, state, zipcode } = result.data;
-        const location = yield Models_1.Location.update({
-            latitude,
-            longitude,
-            address,
-            lga,
-            state,
-            zipcode
-        }, {
-            where: { id: locationId },
-        });
-        return (0, modules_1.successResponse)(res, 'Location updated successfully', location);
-    }
-    catch (error) {
-        console.error('Error updating location:', error);
-        return (0, modules_1.errorResponse)(res, 'Error updating location', error);
-    }
-});
-exports.updateLocation = updateLocation;
-const getMyLocations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { id } = req.user;
-    try {
-        const location = yield Models_1.Location.findAll({
-            where: { userId: id },
-            order: [['createdAt', 'DESC']]
-        });
-        return (0, modules_1.successResponse)(res, 'success', location);
-    }
-    catch (error) {
-        console.log(error);
-        return (0, modules_1.errorResponse)(res, 'Error getting location', error);
-    }
-});
-exports.getMyLocations = getMyLocations;
 const getLocationById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
-        const location = yield Models_1.Location.findByPk(id);
+        const location = yield prisma_1.default.location.findUnique({
+            where: { id: Number(id) }
+        });
+        if (!location) {
+            return (0, modules_1.handleResponse)(res, 404, false, 'Location not found');
+        }
         return (0, modules_1.successResponse)(res, 'success', location);
     }
     catch (error) {
-        console.log(error);
-        return (0, modules_1.errorResponse)(res, 'Error getting location', error);
+        return (0, modules_1.errorResponse)(res, 'error', error);
     }
 });
 exports.getLocationById = getLocationById;
+const getMyLocations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.user;
+    try {
+        const locations = yield prisma_1.default.location.findMany({
+            where: { userId: id },
+            orderBy: { createdAt: 'desc' }
+        });
+        return (0, modules_1.successResponse)(res, 'success', locations);
+    }
+    catch (error) {
+        return (0, modules_1.errorResponse)(res, 'error', error);
+    }
+});
+exports.getMyLocations = getMyLocations;
 const addLocation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.user;
     try {
-        const result = body_1.storeLocationSchema.safeParse(req.body);
-        if (!result.success) {
-            return res.status(400).json({
-                error: "Invalid query parameters",
-                issues: result.error.format(),
-            });
-        }
-        const { latitude, longitude, address, lga, state, zipcode } = result.data;
-        const location = yield Models_1.Location.create({
-            latitude,
-            longitude,
-            address,
-            lga,
-            state,
-            zipcode,
-            userId: id
+        const { latitude, longitude, address, lga, state, zipcode } = req.body;
+        const location = yield prisma_1.default.location.create({
+            data: {
+                latitude,
+                longitude,
+                address,
+                lga,
+                state,
+                zipcode,
+                userId: id
+            }
         });
         return (0, modules_1.successResponse)(res, 'Location added successfully', location);
     }
@@ -102,13 +68,36 @@ const addLocation = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.addLocation = addLocation;
+const updateLocation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { locationId } = req.params;
+    const { id } = req.user;
+    try {
+        const location = yield prisma_1.default.location.findFirst({
+            where: { id: Number(locationId), userId: id }
+        });
+        if (!location) {
+            return (0, modules_1.handleResponse)(res, 404, false, 'Location not found');
+        }
+        const { latitude, longitude, address, lga, state, zipcode } = req.body;
+        const updated = yield prisma_1.default.location.update({
+            where: { id: Number(locationId) },
+            data: Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign({}, (latitude !== undefined && { latitude })), (longitude !== undefined && { longitude })), (address !== undefined && { address })), (lga !== undefined && { lga })), (state !== undefined && { state })), (zipcode !== undefined && { zipcode }))
+        });
+        return (0, modules_1.successResponse)(res, 'Location updated successfully', updated);
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'Error updating location', error);
+    }
+});
+exports.updateLocation = updateLocation;
 const deleteLocation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
-        const deleted = yield Models_1.Location.destroy({
-            where: { id }
+        yield prisma_1.default.location.delete({
+            where: { id: Number(id) }
         });
-        return (0, modules_1.successResponse)(res, 'Location deleted successfully', deleted);
+        return (0, modules_1.successResponse)(res, 'Location deleted successfully', {});
     }
     catch (error) {
         console.log(error);

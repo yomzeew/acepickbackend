@@ -8,21 +8,24 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deletePortfolio = exports.updatePortfolio = exports.addPortfolio = exports.getPortfolios = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
 const body_1 = require("../validation/body");
 const getPortfolios = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.user;
     try {
-        const profile = yield Models_1.Profile.findOne({ where: { userId: id } });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const portfolios = yield Models_1.Portfolio.findAll({
+        const portfolios = yield prisma_1.default.portfolio.findMany({
             where: { profileId: profile.id },
-            order: [['createdAt', 'DESC']],
+            orderBy: { createdAt: 'desc' }
         });
         return (0, modules_1.successResponse)(res, 'success', portfolios);
     }
@@ -43,17 +46,19 @@ const addPortfolio = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
     const { title, description, duration, date, file } = result.data;
     try {
-        const profile = yield Models_1.Profile.findOne({ where: { userId: id } });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const portfolio = yield Models_1.Portfolio.create({
-            title,
-            description,
-            duration,
-            date,
-            file,
-            profileId: profile.id
+        const portfolio = yield prisma_1.default.portfolio.create({
+            data: {
+                title,
+                description,
+                duration,
+                date,
+                file,
+                profileId: profile.id
+            }
         });
         return (0, modules_1.successResponse)(res, 'success', portfolio);
     }
@@ -67,7 +72,6 @@ const updatePortfolio = (req, res) => __awaiter(void 0, void 0, void 0, function
     if (!id) {
         return (0, modules_1.handleResponse)(res, 400, false, 'Provide an id');
     }
-    //const { userId } = req.user;
     const result = body_1.updatePortfolioSchema.safeParse(req.body);
     if (!result.success) {
         return res.status(400).json({
@@ -77,8 +81,9 @@ const updatePortfolio = (req, res) => __awaiter(void 0, void 0, void 0, function
         });
     }
     try {
-        const updated = yield Models_1.Portfolio.update(result.data, {
-            where: { id }
+        const updated = yield prisma_1.default.portfolio.update({
+            where: { id: Number(id) },
+            data: result.data
         });
         return (0, modules_1.successResponse)(res, 'success', updated);
     }
@@ -93,8 +98,8 @@ const deletePortfolio = (req, res) => __awaiter(void 0, void 0, void 0, function
         return (0, modules_1.handleResponse)(res, 400, false, 'Provide an id');
     }
     try {
-        yield Models_1.Portfolio.destroy({
-            where: { id }
+        yield prisma_1.default.portfolio.delete({
+            where: { id: Number(id) }
         });
         return (0, modules_1.successResponse)(res, 'success', { message: 'Portfolio deleted successfully' });
     }

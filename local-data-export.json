@@ -1,0 +1,140 @@
+{
+  "sectors": [],
+  "categories": [],
+  "skills": [],
+  "users": [],
+  "profiles": [],
+  "wallets": [],
+  "locations": [],
+  "professionals": [],
+  "professions": [],
+  "products": [],
+  "jobs": [],
+  "product_transactions": [],
+  "orders": [],
+  "materials": [],
+  "professional_skills": [],
+  "job_skills": [],
+  "transactions": [],
+  "ledger_entries": [],
+  "reviews": [],
+  "ratings": [],
+  "notifications": [],
+  "disputes": [],
+  "activities": [],
+  "accounts": [],
+  "certifications": [],
+  "education": [
+    {
+      "id": 31,
+      "school": "University of Lagos",
+      "degreeType": "B.Sc",
+      "course": "Computer Science",
+      "startDate": "2015-09-01T00:00:00.000Z",
+      "gradDate": "2019-07-15T00:00:00.000Z",
+      "isCurrent": false,
+      "profileId": 119,
+      "createdAt": "2026-03-17T17:39:53.805Z",
+      "updatedAt": "2026-03-17T17:39:53.805Z"
+    },
+    {
+      "id": 32,
+      "school": "Federal Polytechnic Ilaro",
+      "degreeType": "HND",
+      "course": "Mechanical Engineering",
+      "startDate": "2012-09-01T00:00:00.000Z",
+      "gradDate": "2016-07-15T00:00:00.000Z",
+      "isCurrent": false,
+      "profileId": 120,
+      "createdAt": "2026-03-17T17:39:53.806Z",
+      "updatedAt": "2026-03-17T19:50:08.500Z"
+    }
+  ],
+  "experience": [
+    {
+      "id": 31,
+      "postHeld": "Senior Developer",
+      "workPlace": "Andela Nigeria",
+      "startDate": "2019-08-01T00:00:00.000Z",
+      "endDate": null,
+      "isCurrent": true,
+      "description": "Building scalable web applications for enterprise clients.",
+      "profileId": 119,
+      "createdAt": "2026-03-17T17:39:53.806Z",
+      "updatedAt": "2026-03-17T17:39:53.806Z"
+    },
+    {
+      "id": 32,
+      "postHeld": "Lead Plumber",
+      "workPlace": "HomeFix Services",
+      "startDate": "2016-08-01T00:00:00.000Z",
+      "endDate": "2022-12-31T00:00:00.000Z",
+      "isCurrent": false,
+      "description": "Managed a team of 5 plumbers for residential projects.",
+      "profileId": 120,
+      "createdAt": "2026-03-17T17:39:53.807Z",
+      "updatedAt": "2026-03-17T19:16:48.480Z"
+    }
+  ],
+  "portfolios": [],
+  "cooperations": [],
+  "directors": [],
+  "chat_rooms": [],
+  "messages": [],
+  "online_users": [],
+  "riders": [],
+  "delivery_pricing": [],
+  "commissions": [],
+  "transfers": [],
+  "verify": [
+    {
+      "id": 101,
+      "contact": "john.client@test.com",
+      "code": "1234",
+      "verified": true,
+      "type": "EMAIL",
+      "createdAt": "2026-03-17T17:39:53.862Z"
+    },
+    {
+      "id": 102,
+      "contact": "08011111111",
+      "code": "1234",
+      "verified": true,
+      "type": "SMS",
+      "createdAt": "2026-03-17T17:39:53.863Z"
+    },
+    {
+      "id": 103,
+      "contact": "sarah.client@test.com",
+      "code": "1234",
+      "verified": true,
+      "type": "EMAIL",
+      "createdAt": "2026-03-17T17:39:53.863Z"
+    },
+    {
+      "id": 104,
+      "contact": "08022222222",
+      "code": "1234",
+      "verified": true,
+      "type": "SMS",
+      "createdAt": "2026-03-17T17:39:53.864Z"
+    },
+    {
+      "id": 105,
+      "contact": "emeka.pro@test.com",
+      "code": "1234",
+      "verified": true,
+      "type": "EMAIL",
+      "createdAt": "2026-03-17T17:39:53.864Z"
+    },
+    {
+      "id": 106,
+      "contact": "08033333333",
+      "code": "1234",
+      "verified": true,
+      "type": "SMS",
+      "createdAt": "2026-03-17T17:39:53.864Z"
+    }
+  ],
+  "voicerecords": []
+}

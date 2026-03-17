@@ -1,7 +1,6 @@
-import { Profession } from "../models/Profession"
 import { Request, Response } from "express"
 import { successResponse, errorResponse, handleResponse } from "../utils/modules"
-import { Sector } from "../models/Sector"
+import prisma from "../config/prisma"
 
 
 export const getProfessions = async (req: Request, res: Response) => {
@@ -10,28 +9,25 @@ export const getProfessions = async (req: Request, res: Response) => {
         order_by?: string;
     };
 
-    // Parse sector_id safely
     const sectorId = sector_id ? parseInt(sector_id, 10) : undefined;
 
-    // Prepare where condition
     const whereCondition = sectorId ? { sectorId } : {};
 
-    // Prepare order parameters safely
-    let orderParams: [string, "ASC" | "DESC"] | undefined = undefined;
+    let orderBy: any = undefined;
 
     if (order_by) {
         const parts = order_by.split("-");
         if (parts.length === 2) {
             const column = parts[0];
-            const direction = parts[1].toUpperCase() === "DESC" ? "DESC" : "ASC";
-            orderParams = [column, direction];
+            const direction = parts[1].toLowerCase() === "desc" ? "desc" : "asc";
+            orderBy = { [column]: direction };
         }
     }
 
     try {
-        const professions = await Profession.findAll({
+        const professions = await prisma.profession.findMany({
             where: whereCondition,
-            order: orderParams ? [orderParams] : undefined, // Sequelize expects an array of arrays
+            orderBy: orderBy,
         });
 
         return successResponse(res, "success", professions);
@@ -46,13 +42,9 @@ export const getProfessionById = async (req: Request, res: Response) => {
     let { id } = req.params
 
     try {
-        let professions = await Profession.findOne({
-            where: { id },
-            include: [
-                {
-                    model: Sector,
-                }
-            ]
+        let professions = await prisma.profession.findUnique({
+            where: { id: Number(id) },
+            include: { sector: true }
         })
 
         return successResponse(res, "success", professions)
@@ -69,13 +61,13 @@ export const createProfession = async (req: Request, res: Response) => {
     }
 
     try {
-        const sector = await Sector.findOne({ where: { id: sectorId } })
+        const sector = await prisma.sector.findUnique({ where: { id: sectorId } })
 
         if (!sector) {
             return handleResponse(res, 400, false, "Invalid sector id")
         }
 
-        let profession = await Profession.create({ title, image, sectorId })
+        let profession = await prisma.profession.create({ data: { title, image, sectorId } })
 
         return successResponse(res, "success", profession)
     } catch (error) {
@@ -91,7 +83,10 @@ export const updateProfession = async (req: Request, res: Response) => {
     }
 
     try {
-        let prof = await Profession.update(req.body, { where: { id: id } });
+        let prof = await prisma.profession.update({
+            where: { id: Number(id) },
+            data: req.body
+        });
 
         return successResponse(res, "success", prof)
     } catch (error) {
@@ -103,7 +98,7 @@ export const deleteProfession = async (req: Request, res: Response) => {
     let { id } = req.params;
 
     try {
-        let prof = await Profession.destroy({ where: { id: id } });
+        await prisma.profession.delete({ where: { id: Number(id) } });
 
         return successResponse(res, "success", 'Profession deleted')
     } catch (error) {

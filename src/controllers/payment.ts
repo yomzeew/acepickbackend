@@ -1,18 +1,19 @@
 import { Request, Response } from "express";
-import { Transfer, Transaction, Wallet, User, OnlineUser, Job, Profile, ProductTransaction, Product, Order } from "../models/Models";
+import prisma from "../config/prisma";
+import { Decimal } from "@prisma/client/runtime/library";
 import { randomId, errorResponse, handleResponse, successResponse } from "../utils/modules";
 import config from "../config/configSetup"
 import axios from 'axios'
-import { Accounts, JobStatus, OrderStatus, PayStatus, ProductStatus, ProductTransactionStatus, TransactionDescription, TransactionStatus, TransactionType, TransferStatus } from "../utils/enum";
-import { v4 as uuidv4 } from 'uuid';
-import { where } from "sequelize";
-import { sendPushNotification } from "../services/notification";
+import { Accounts, JobStatus, OrderMethod, OrderStatus, PayStatus, ProductStatus, ProductTransactionStatus, TransactionDescription, TransactionStatus, TransactionType, TransferStatus } from "../utils/enum";
+import { NotificationService } from "../services/notification";
+import { NotificationType } from "../utils/enum";
 import { initPaymentSchema, withdrawSchema } from "../validation/body";
 import bcrypt from 'bcryptjs';
 import { getIO } from "../chat";
 import { Emit } from "../utils/events";
 import { jobPaymentEmail, productPaymentEmail } from "../utils/messages";
 import { sendEmail } from "../services/gmail";
+import { notifyNearbyRiders } from "./order";
 import { LedgerService } from "../services/ledgerService";
 
 
@@ -38,35 +39,24 @@ export const initiatePayment = async (req: Request, res: Response) => {
 
         switch (description.toLowerCase()) {
             case "job payment": {
-                const job = await Job.findOne({
-                    where: {
-                        id: jobId
-                    }
-                });
-        
+                const job = await prisma.job.findUnique({ where: { id: jobId! } });
                 expectedAmount = Number(job?.workmanship ?? 0) + Number(job?.materialsCost ?? 0);
                 break;
             }
         
             case "product payment": {
-                const productTrans = await ProductTransaction.findOne({
-                    where: {
-                        id: productTransactionId
-                    }
+                const productTrans = await prisma.productTransaction.findUnique({
+                    where: { id: productTransactionId! }
                 });
-        
                 expectedAmount = Number(productTrans?.price ?? 0);
                 break;
             }
         
             case "product_order payment": {
-                const productOrderTrans = await ProductTransaction.findOne({
-                    where: {
-                        id: productTransactionId
-                    },
-                    include: [Order]
+                const productOrderTrans = await prisma.productTransaction.findUnique({
+                    where: { id: productTransactionId! },
+                    include: { order: true }
                 });
-        
                 expectedAmount = Number(productOrderTrans?.price ?? 0) 
                                + Number(productOrderTrans?.order?.cost ?? 0);
                 break;
@@ -99,20 +89,20 @@ export const initiatePayment = async (req: Request, res: Response) => {
 
         const data = paystackResponseInit.data.data;
 
-
-        const transaction = await Transaction.create({
-            userId: id,
-            amount: amount,
-            reference: data.reference,
-            status: TransactionStatus.PENDING,
-            currency: data.currency,
-            timestamp: new Date(),
-            description: description.toLowerCase(),
-            jobId: description.toString().includes('job') ? jobId : null,
-            productTransactionId: description.toString().includes('product') ? productTransactionId : null,
-            type: description.toLowerCase() === TransactionDescription.WALLET_TOPUP ? TransactionType.CREDIT : TransactionType.DEBIT,
+        await prisma.transaction.create({
+            data: {
+                userId: id,
+                amount: amount,
+                reference: data.reference,
+                status: TransactionStatus.PENDING as any,
+                currency: data.currency,
+                timestamp: new Date(),
+                description: description.toLowerCase(),
+                jobId: description.toString().includes('job') ? jobId : null,
+                productTransactionId: description.toString().includes('product') ? productTransactionId : null,
+                type: description.toLowerCase() === TransactionDescription.WALLET_TOPUP ? TransactionType.CREDIT as any : TransactionType.DEBIT as any,
+            }
         })
-
 
         return successResponse(res, 'success', data)
     } catch (error) {
@@ -138,23 +128,7 @@ export const verifyPayment = async (req: Request, res: Response) => {
         const { data } = paystackResponse.data;
 
         if (data.status === TransactionStatus.SUCCESS) {
-
-
-            // if (created) {
-            //     const wallet = await Wallet.findOne({ where: { userId: id } })
-
-            //     if (wallet) {
-            //         let prevAmount = Number(wallet.currentBalance);
-            //         let newAmount = Number(transaction.amount);
-
-            //         wallet.previousBalance = prevAmount;
-            //         wallet.currentBalance = prevAmount + newAmount;
-
-            //         await wallet.save()
-            //     }
-            // }
-
-            // return handleResponse(res, 200, true, "Payment sucessfully verified", { result: paystackResponse.data })
+            // Verification handled by webhook
         }
 
         return handleResponse(res, 200, true, "Payment sucessfully verified", { result: paystackResponse.data })
@@ -179,7 +153,7 @@ export const initiateTransfer = async (req: Request, res: Response) => {
 
     const { amount, recipientCode, pin, reason } = result.data;
 
-    const wallet = await Wallet.findOne({ where: { userId: id } });
+    const wallet = await prisma.wallet.findFirst({ where: { userId: id } });
 
     if (!wallet) {
         return errorResponse(res, 'error', 'Wallet not found');
@@ -193,32 +167,36 @@ export const initiateTransfer = async (req: Request, res: Response) => {
         return handleResponse(res, 403, false, 'Invalid PIN');
     }
 
-    if (amount > wallet.currentBalance) {
+    if (amount > Number(wallet.currentBalance)) {
         return handleResponse(res, 403, false, 'Insufficient balance');
     }
 
     const reference = randomId(12);
 
-    const transfer = await Transfer.create({
-        userId: id,
-        amount,
-        recipientCode,
-        reference,
-        reason,
-        timestamp: new Date(),
+    const transfer = await prisma.transfer.create({
+        data: {
+            userId: id,
+            amount,
+            recipientCode,
+            reference,
+            reason,
+            timestamp: new Date(),
+        }
     })
 
-    const transaction = await Transaction.create({
-        userId: id,
-        amount: amount,
-        reference: transfer.reference,
-        status: TransactionStatus.PENDING,
-        currency: 'NGN',
-        timestamp: new Date(),
-        description: 'wallet withdrawal',
-        jobId: null,
-        productTransactionId: null,
-        type: TransactionType.DEBIT,
+    await prisma.transaction.create({
+        data: {
+            userId: id,
+            amount: amount,
+            reference: transfer.reference,
+            status: TransactionStatus.PENDING as any,
+            currency: 'NGN',
+            timestamp: new Date(),
+            description: 'wallet withdrawal',
+            jobId: null,
+            productTransactionId: null,
+            type: TransactionType.DEBIT as any,
+        }
     })
 
     const response = await axios.post(
@@ -242,8 +220,6 @@ export const initiateTransfer = async (req: Request, res: Response) => {
 }
 
 export const finalizeTransfer = async (req: Request, res: Response) => {
-
-
     const { transferCode, otp } = req.body;
 
     const response = await axios.post('https://api.paystack.co/transfer/finalize_transfer', {
@@ -266,11 +242,11 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
 
     try {
         if (payload.event.includes('transfer')) {
-            const transfer = await Transfer.findOne({
+            const transfer = await prisma.transfer.findFirst({
                 where: { reference: payload.data.reference }
             });
 
-            const transaction = await Transaction.findOne({
+            const transaction = await prisma.transaction.findFirst({
                 where: { reference: payload.data.reference }
             });
 
@@ -282,9 +258,9 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                 return res.status(200).send('Transaction not found');
             }
 
-            const user = await User.findOne({
+            const user = await prisma.user.findUnique({
                 where: { id: transfer.userId },
-                include: [OnlineUser, Wallet]
+                include: { onlineUser: true, wallet: true }
             });
 
             if (!user) {
@@ -293,15 +269,25 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
 
             switch (payload.event) {
                 case 'transfer.success':
-                    transfer.status = TransferStatus.SUCCESS;
-                    await transfer.save();
+                    await prisma.transfer.update({
+                        where: { id: transfer.id },
+                        data: { status: TransferStatus.SUCCESS as any }
+                    });
 
-                    transaction.status = TransactionStatus.SUCCESS;
-                    await transaction.save();
+                    await prisma.transaction.update({
+                        where: { id: transaction.id },
+                        data: { status: TransactionStatus.SUCCESS as any }
+                    });
 
-                    user.wallet.previousBalance = user.wallet.currentBalance;
-                    user.wallet.currentBalance -= transfer.amount;
-                    await user.wallet.save();
+                    if (user.wallet) {
+                        await prisma.wallet.update({
+                            where: { id: user.wallet.id },
+                            data: {
+                                previousBalance: user.wallet.currentBalance,
+                                currentBalance: new Decimal(user.wallet.currentBalance).sub(new Decimal(transfer.amount))
+                            }
+                        });
+                    }
 
                     await LedgerService.createEntry([
                         {
@@ -311,7 +297,6 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                             type: TransactionType.DEBIT,
                             account: Accounts.PROFESSIONAL_WALLET
                         },
-
                         {
                             transactionId: transaction.id,
                             userId: transaction.userId,
@@ -321,33 +306,38 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                         }
                     ])
 
-                    sendPushNotification(
-                        user.fcmToken,
-                        `Transfer Success`,
-                        `Your transfer of ${transfer.amount} was successful`,
-                        {}
-                    );
+                    await NotificationService.create({
+                        userId: user.id,
+                        type: NotificationType.PAYMENT,
+                        title: 'Transfer Successful',
+                        message: `Your transfer of ${transfer.amount} was successful`,
+                        data: { transferId: transfer.id },
+                    });
                     break;
 
                 case 'transfer.failed':
-                    transfer.status = TransferStatus.FAILED;
-                    await transfer.save();
+                    await prisma.transfer.update({
+                        where: { id: transfer.id },
+                        data: { status: TransferStatus.FAILED as any }
+                    });
 
-                    sendPushNotification(
-                        user.fcmToken,
-                        `Transfer Failed`,
-                        `Your transfer of ${transfer.amount} failed`,
-                        {}
-                    );
+                    await NotificationService.create({
+                        userId: user.id,
+                        type: NotificationType.PAYMENT,
+                        title: 'Transfer Failed',
+                        message: `Your transfer of ${transfer.amount} failed`,
+                        data: { transferId: transfer.id },
+                    });
                     break;
 
                 case 'transfer.reversed':
-                    sendPushNotification(
-                        user.fcmToken,
-                        `Transfer Reversed`,
-                        `Your transfer of ${transfer.amount} has been reversed`,
-                        {}
-                    );
+                    await NotificationService.create({
+                        userId: user.id,
+                        type: NotificationType.PAYMENT,
+                        title: 'Transfer Reversed',
+                        message: `Your transfer of ${transfer.amount} has been reversed`,
+                        data: { transferId: transfer.id },
+                    });
                     break;
 
                 default:
@@ -358,15 +348,13 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
         } else if (payload.event.includes('charge.success')) {
             const { reference, status, channel, paid_at } = payload.data;
 
-            const transaction = await Transaction.findOne({
-                where: { reference: reference },
-                include: [
-                    {
-                        model: User,
-                        as: 'user',
-                        include: [OnlineUser, Wallet]
+            const transaction = await prisma.transaction.findFirst({
+                where: { reference },
+                include: {
+                    user: {
+                        include: { onlineUser: true, wallet: true }
                     }
-                ]
+                }
             })
 
             if (!transaction) {
@@ -377,35 +365,34 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                 return res.status(200).send('Transaction already processed');
             }
 
-            transaction.status = status;
-            transaction.channel = channel;
-            transaction.timestamp = new Date(paid_at);
-
-            await transaction.save();
+            await prisma.transaction.update({
+                where: { id: transaction.id },
+                data: {
+                    status,
+                    channel,
+                    timestamp: new Date(paid_at),
+                }
+            });
 
             if (transaction.jobId
                 && (transaction.description === TransactionDescription.JOB_PAYMENT)) {
-                const job = await Job.findByPk(transaction.jobId, {
-                    include: [
-                        {
-                            model: User,
-                            as: 'professional',
-                            include: [Profile]
-                        },
-                        {
-                            model: User,
-                            as: 'client',
-                            include: [Profile]
-                        }
-                    ]
+                const job = await prisma.job.findUnique({
+                    where: { id: transaction.jobId },
+                    include: {
+                        professional: { include: { profile: true } },
+                        client: { include: { profile: true } }
+                    }
                 });
 
                 if (job) {
-                    job.status = JobStatus.ONGOING;
-                    job.payStatus = PayStatus.PAID;
-                    job.paymentRef = reference;
-
-                    await job.save();
+                    await prisma.job.update({
+                        where: { id: job.id },
+                        data: {
+                            status: JobStatus.ONGOING as any,
+                            payStatus: PayStatus.PAID as any,
+                            paymentRef: reference,
+                        }
+                    });
 
                     await LedgerService.createEntry([
                         {
@@ -415,7 +402,6 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                             type: TransactionType.DEBIT,
                             account: Accounts.PAYMENT_GATEWAY
                         },
-
                         {
                             transactionId: transaction.id,
                             userId: null,
@@ -425,21 +411,21 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                         }
                     ])
 
+                    await NotificationService.create({
+                        userId: job.professionalId,
+                        type: NotificationType.PAYMENT,
+                        title: 'Job Payment Received',
+                        message: `Job "${job?.title}" has been paid by ${job?.client?.profile?.firstName} ${job?.client?.profile?.lastName}`,
+                        data: { jobId: job.id },
+                    });
 
-                    sendPushNotification(
-                        transaction.user.fcmToken,
-                        `Job Payment`,
-                        `Job titled: ${job?.title} has been paid by ${job?.client?.profile?.firstName} ${job?.client?.profile?.lastName}}`,
-                        {}
-                    );
+                    const emailContent = jobPaymentEmail(job)
 
-                    const email = jobPaymentEmail(job?.toJSON())
-
-                    const msgStat = await sendEmail(
-                        job.dataValues.professional.email,
-                        email.title,
-                        email.body,
-                        job.dataValues.professional.profile.firstName + ' ' + job.dataValues.professional.profile.lastName
+                    await sendEmail(
+                        job.professional!.email,
+                        emailContent.title,
+                        emailContent.body,
+                        job.professional!.profile!.firstName + ' ' + job.professional!.profile!.lastName
                     )
                 }
             }
@@ -447,30 +433,25 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
             if (transaction.productTransactionId
                 && (transaction.description === TransactionDescription.PRODUCT_PAYMENT
                     || transaction.description === TransactionDescription.PRODUCT_ORDER_PAYMENT)) {
-                const productTransaction = await ProductTransaction.findByPk(transaction.productTransactionId, {
-                    include: [
-                        {
-                            model: User,
-                            as: 'buyer',
-                            include: [Profile]
-                        },
-                        {
-                            model: User,
-                            as: 'seller',
-                            include: [Profile]
-                        },
-                        {
-                            model: Product
-                        }
-                    ]
+                const productTransaction = await prisma.productTransaction.findUnique({
+                    where: { id: transaction.productTransactionId },
+                    include: {
+                        buyer: { include: { profile: true } },
+                        seller: { include: { profile: true } },
+                        product: true
+                    }
                 });
 
                 if (productTransaction) {
-                    productTransaction.status = ProductTransactionStatus.ORDERED;
-                    await productTransaction.save();
+                    await prisma.productTransaction.update({
+                        where: { id: productTransaction.id },
+                        data: { status: ProductTransactionStatus.ORDERED as any }
+                    });
 
-                    productTransaction.product.quantity -= productTransaction.quantity;
-                    await productTransaction.product.save();
+                    await prisma.product.update({
+                        where: { id: productTransaction.product.id },
+                        data: { quantity: productTransaction.product.quantity - productTransaction.quantity }
+                    });
 
                     await LedgerService.createEntry([
                         {
@@ -480,7 +461,6 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                             type: TransactionType.DEBIT,
                             account: Accounts.PAYMENT_GATEWAY
                         },
-
                         {
                             transactionId: transaction.id,
                             userId: null,
@@ -491,39 +471,88 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                     ])
 
                     //send notification to seller
-
-                    sendPushNotification(
-                        transaction.user.fcmToken,
-                        `Product Payment`,
-                        `${productTransaction?.quantity} of your product: ${productTransaction?.product.name} has been paid by ${productTransaction?.buyer.profile.firstName} ${productTransaction?.buyer.profile.lastName}`,
-                        {}
-                    );
+                    await NotificationService.create({
+                        userId: productTransaction.sellerId,
+                        type: NotificationType.PAYMENT,
+                        title: 'Product Payment Received',
+                        message: `${productTransaction?.quantity} of your product: ${productTransaction?.product.name} has been paid by ${productTransaction?.buyer.profile?.firstName} ${productTransaction?.buyer.profile?.lastName}`,
+                        data: { productTransactionId: productTransaction.id },
+                    });
 
                     //send email to seller
-                    const email = productPaymentEmail(productTransaction);
+                    const emailContent = productPaymentEmail(productTransaction);
 
-                    const msgStat = await sendEmail(
+                    await sendEmail(
                         productTransaction.seller.email,
-                        email.title,
-                        email.body,
-                        productTransaction.seller.profile.firstName + ' ' + productTransaction.seller.profile.lastName,
+                        emailContent.title,
+                        emailContent.body,
+                        productTransaction.seller.profile?.firstName + ' ' + productTransaction.seller.profile?.lastName,
                     )
-                }
 
+                    // Self-pickup: notify vendor that buyer will collect the item
+                    if (productTransaction.orderMethod === OrderMethod.SELF_PICKUP) {
+                        await NotificationService.create({
+                            userId: productTransaction.sellerId,
+                            type: NotificationType.ORDER,
+                            title: 'Self-Pickup Order',
+                            message: `${productTransaction?.buyer.profile?.firstName} ${productTransaction?.buyer.profile?.lastName} will self-pickup ${productTransaction?.quantity}x ${productTransaction?.product.name}. Please prepare the item.`,
+                            data: { productTransactionId: productTransaction.id, orderMethod: 'self_pickup' },
+                        });
+
+                        try {
+                            getIO().to(productTransaction.sellerId).emit(Emit.ORDER_STATUS_UPDATE, {
+                                data: {
+                                    productTransactionId: productTransaction.id,
+                                    status: 'self_pickup_paid',
+                                    orderMethod: 'self_pickup',
+                                    buyer: productTransaction.buyer,
+                                }
+                            });
+                        } catch (e) { /* socket may not be initialized */ }
+                    }
+                }
             }
 
             if (transaction.description === TransactionDescription.PRODUCT_ORDER_PAYMENT) {
-                const order = await Order.findOne({
+                const order = await prisma.order.findFirst({
                     where: {
-                        productTransactionId: transaction.productTransactionId,
-                        status: OrderStatus.PENDING,
+                        productTransactionId: transaction.productTransactionId!,
+                        status: OrderStatus.PENDING as any,
                     }
                 })
 
-
                 if (order) {
-                    order.status = OrderStatus.PAID;
-                    await order.save();
+                    await prisma.order.update({
+                        where: { id: order.id },
+                        data: { status: OrderStatus.PAID as any }
+                    });
+
+                    // Auto-notify nearby riders about the new delivery
+                    const orderWithDetails = await prisma.order.findUnique({
+                        where: { id: order.id },
+                        include: {
+                            dropoffLocation: true,
+                            productTransaction: {
+                                include: {
+                                    product: { include: { pickupLocation: true } },
+                                    seller: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
+                                    buyer: { select: { id: true, profile: { select: { firstName: true, lastName: true } } } },
+                                }
+                            }
+                        }
+                    });
+
+                    if (orderWithDetails) {
+                        const pickup = orderWithDetails.productTransaction?.product?.pickupLocation;
+                        const dropoff = orderWithDetails.dropoffLocation;
+                        if (pickup?.latitude && pickup?.longitude && dropoff?.latitude && dropoff?.longitude) {
+                            notifyNearbyRiders(
+                                orderWithDetails,
+                                Number(pickup.latitude), Number(pickup.longitude),
+                                Number(dropoff.latitude), Number(dropoff.longitude)
+                            );
+                        }
+                    }
                 }
             }
 
@@ -532,10 +561,13 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                     let prevAmount = Number(transaction.user.wallet.currentBalance);
                     let newAmount = Number(transaction.amount);
 
-                    transaction.user.wallet.previousBalance = prevAmount;
-                    transaction.user.wallet.currentBalance = prevAmount + newAmount;
-
-                    await transaction.user.wallet.save()
+                    await prisma.wallet.update({
+                        where: { id: transaction.user.wallet.id },
+                        data: {
+                            previousBalance: prevAmount,
+                            currentBalance: prevAmount + newAmount,
+                        }
+                    });
 
                     await LedgerService.createEntry([
                         {
@@ -545,7 +577,6 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                             type: TransactionType.DEBIT,
                             account: Accounts.PAYMENT_GATEWAY
                         },
-
                         {
                             transactionId: transaction.id,
                             userId: transaction.userId,
@@ -557,12 +588,13 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
                 }
             }
 
-            sendPushNotification(
-                transaction.user.fcmToken,
-                `Payment Success`,
-                `Your Payment of ${transaction.amount} was successful`,
-                {}
-            );
+            await NotificationService.create({
+                userId: transaction.userId,
+                type: NotificationType.PAYMENT,
+                title: 'Payment Successful',
+                message: `Your payment of ${transaction.amount} was successful`,
+                data: { transactionId: transaction.id },
+            });
 
             const io = getIO();
 
@@ -608,5 +640,3 @@ export const verifyTransfer = async (req: Request, res: Response) => {
         return errorResponse(res, 'error', error.response.data.message);
     }
 }
-
-

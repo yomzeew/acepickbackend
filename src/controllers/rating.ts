@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import { addRatingSchema } from "../validation/body";
-import { Rating } from "../models/Rating";
-import { Job, Order, ProductTransaction, User } from "../models/Models";
+import prisma from "../config/prisma";
 import { JobStatus, OrderStatus, UserRole } from "../utils/enum";
 import { errorResponse, handleResponse, successResponse } from "../utils/modules";
 import z from "zod";
@@ -22,27 +21,22 @@ export const giveRating = async (req: Request, res: Response) => {
 
         const { rating, jobId, orderId } = result.data
 
-        let user;
-        let job;
-        let order;
+        let user: any;
+        let job: any;
+        let order: any;
 
         if (jobId) {
-            const existingRating = await Rating.findOne({
-                where: {
-                    jobId,
-                    clientUserId: id
-                }
+            const existingRating = await prisma.rating.findFirst({
+                where: { jobId, clientUserId: id }
             })
 
             if (existingRating) {
                 return handleResponse(res, 400, false, 'You have already rated this job')
             }
 
-            job = await Job.findByPk(jobId, {
-                include: [{
-                    model: User,
-                    as: "professional"
-                }]
+            job = await prisma.job.findUnique({
+                where: { id: jobId },
+                include: { professional: true }
             })
 
             if (!job) {
@@ -61,24 +55,20 @@ export const giveRating = async (req: Request, res: Response) => {
         }
 
         if (orderId) {
-            const existingRating = await Rating.findOne({
-                where: {
-                    orderId,
-                    clientUserId: id
-                }
+            const existingRating = await prisma.rating.findFirst({
+                where: { orderId, clientUserId: id }
             })
 
             if (existingRating) {
                 return handleResponse(res, 400, false, 'You have already rated this order')
             }
 
-            order = await Order.findByPk(orderId, {
-                include: [{
-                    model: User,
-                    as: "rider"
-                }, {
-                    model: ProductTransaction
-                }]
+            order = await prisma.order.findUnique({
+                where: { id: orderId },
+                include: {
+                    rider: true,
+                    productTransaction: true
+                }
             })
 
             if (!order) {
@@ -104,12 +94,14 @@ export const giveRating = async (req: Request, res: Response) => {
             return handleResponse(res, 400, false, "User is neither a professional nor delivery");
         }
 
-        const ratingObj = await Rating.create({
-            value: rating,
-            professionalUserId: user.id,
-            clientUserId: id,
-            ...(user.role === UserRole.DELIVERY ? { orderId } : {}),
-            ...(user.role === UserRole.PROFESSIONAL ? { jobId } : {})
+        const ratingObj = await prisma.rating.create({
+            data: {
+                value: rating,
+                professionalUserId: user.id,
+                clientUserId: id,
+                ...(user.role === UserRole.DELIVERY ? { orderId } : {}),
+                ...(user.role === UserRole.PROFESSIONAL ? { jobId } : {})
+            }
         });
 
 
@@ -133,7 +125,7 @@ export const isRated = async (req: Request, res: Response) => {
     const { jobId, orderId } = result.data;
 
     try {
-        const rating = await Rating.findOne({
+        const rating = await prisma.rating.findFirst({
             where: {
                 clientUserId: req.user.id,
                 ...(jobId ? { jobId } : {}),

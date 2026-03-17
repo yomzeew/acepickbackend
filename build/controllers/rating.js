@@ -8,11 +8,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isRated = exports.giveRating = void 0;
 const body_1 = require("../validation/body");
-const Rating_1 = require("../models/Rating");
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const enum_1 = require("../utils/enum");
 const modules_1 = require("../utils/modules");
 const query_1 = require("../validation/query");
@@ -31,20 +33,15 @@ const giveRating = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         let job;
         let order;
         if (jobId) {
-            const existingRating = yield Rating_1.Rating.findOne({
-                where: {
-                    jobId,
-                    clientUserId: id
-                }
+            const existingRating = yield prisma_1.default.rating.findFirst({
+                where: { jobId, clientUserId: id }
             });
             if (existingRating) {
                 return (0, modules_1.handleResponse)(res, 400, false, 'You have already rated this job');
             }
-            job = yield Models_1.Job.findByPk(jobId, {
-                include: [{
-                        model: Models_1.User,
-                        as: "professional"
-                    }]
+            job = yield prisma_1.default.job.findUnique({
+                where: { id: jobId },
+                include: { professional: true }
             });
             if (!job) {
                 return (0, modules_1.handleResponse)(res, 404, false, "Job not found");
@@ -58,22 +55,18 @@ const giveRating = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             user = job.professional;
         }
         if (orderId) {
-            const existingRating = yield Rating_1.Rating.findOne({
-                where: {
-                    orderId,
-                    clientUserId: id
-                }
+            const existingRating = yield prisma_1.default.rating.findFirst({
+                where: { orderId, clientUserId: id }
             });
             if (existingRating) {
                 return (0, modules_1.handleResponse)(res, 400, false, 'You have already rated this order');
             }
-            order = yield Models_1.Order.findByPk(orderId, {
-                include: [{
-                        model: Models_1.User,
-                        as: "rider"
-                    }, {
-                        model: Models_1.ProductTransaction
-                    }]
+            order = yield prisma_1.default.order.findUnique({
+                where: { id: orderId },
+                include: {
+                    rider: true,
+                    productTransaction: true
+                }
             });
             if (!order) {
                 return (0, modules_1.handleResponse)(res, 404, false, "Order not found");
@@ -92,7 +85,9 @@ const giveRating = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!(user.role === enum_1.UserRole.PROFESSIONAL || user.role === enum_1.UserRole.DELIVERY)) {
             return (0, modules_1.handleResponse)(res, 400, false, "User is neither a professional nor delivery");
         }
-        const ratingObj = yield Rating_1.Rating.create(Object.assign(Object.assign({ value: rating, professionalUserId: user.id, clientUserId: id }, (user.role === enum_1.UserRole.DELIVERY ? { orderId } : {})), (user.role === enum_1.UserRole.PROFESSIONAL ? { jobId } : {})));
+        const ratingObj = yield prisma_1.default.rating.create({
+            data: Object.assign(Object.assign({ value: rating, professionalUserId: user.id, clientUserId: id }, (user.role === enum_1.UserRole.DELIVERY ? { orderId } : {})), (user.role === enum_1.UserRole.PROFESSIONAL ? { jobId } : {}))
+        });
         return (0, modules_1.successResponse)(res, 'success', ratingObj);
     }
     catch (error) {
@@ -111,7 +106,7 @@ const isRated = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     }
     const { jobId, orderId } = result.data;
     try {
-        const rating = yield Rating_1.Rating.findOne({
+        const rating = yield prisma_1.default.rating.findFirst({
             where: Object.assign(Object.assign({ clientUserId: req.user.id }, (jobId ? { jobId } : {})), (orderId ? { orderId } : {}))
         });
         return (0, modules_1.successResponse)(res, 'success', { rated: !!rating });

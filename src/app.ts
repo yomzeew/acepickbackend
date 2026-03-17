@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 const { createServer } = require('http');
 import * as dotenv from 'dotenv';
 import path from "path";
-import db from './config/db';
+import prisma from './config/prisma';
 import config from './config/configSetup';
 import redis from './config/redis';
 import cors from 'cors';
@@ -12,9 +12,10 @@ import index from './routes/index';
 import auth from './routes/auth';
 import general from './routes/general';
 import admin from './routes/admin'
+import publicRoutes from './routes/public';
 import "reflect-metadata";
 import { initSocket } from './chat';
-import { registerJobHook } from './hooks/jobHook';
+// Job hook functions (onJobStatusUpdate, onJobCreate) are now called explicitly in controllers
 import client from "prom-client";
 import responseTime from "response-time";
 
@@ -34,46 +35,25 @@ const apiResponseHistogram = new client.Histogram({
 });
 
 const dbConnectionsGauge = new client.Gauge({
-    name: "mysql_active_connections",
-    help: "Number of active MySQL connections",
+    name: "pg_active_connections",
+    help: "Number of active PostgreSQL connections",
 });
 
 const dbUptimeGauge = new client.Gauge({
-    name: "mysql_uptime_seconds",
-    help: "MySQL server uptime in seconds",
+    name: "pg_uptime_seconds",
+    help: "PostgreSQL server uptime in seconds",
 });
 
 const dbConnectionsTotal = new client.Gauge({
-    name: "mysql_connections_total",
-    help: "Total number of connection attempts (successful or not) to MySQL",
+    name: "pg_connections_total",
+    help: "Total number of connection attempts to PostgreSQL",
 });
-
-const dbThreadsRunning = new client.Gauge({
-    name: "mysql_threads_running",
-    help: "Number of threads that are not sleeping (active queries)",
-});
-
-const dbSlowQueries = new client.Gauge({
-    name: "mysql_slow_queries_total",
-    help: "Total number of slow queries since server start",
-});
-
-const dbQueriesTotal = new client.Gauge({
-    name: "mysql_queries_total",
-    help: "Total number of statements executed by the server",
-});
-
-// Register them
-register.registerMetric(dbConnectionsTotal);
-register.registerMetric(dbThreadsRunning);
-register.registerMetric(dbSlowQueries);
-register.registerMetric(dbQueriesTotal);
-
 
 // Register metrics
 register.registerMetric(apiResponseHistogram);
 register.registerMetric(dbConnectionsGauge);
 register.registerMetric(dbUptimeGauge);
+register.registerMetric(dbConnectionsTotal);
 
 // Middleware to track response times
 app.use(
@@ -85,31 +65,18 @@ app.use(
 );
 
 const getDBMetrics = async () => {
-    let [rows]: any = await db.query("SHOW STATUS LIKE 'Threads_connected'");
-    if (rows && rows.length > 0) {
-        dbConnectionsGauge.set(parseInt(rows[0].Value, 10));
+    try {
+        const activeConns: any[] = await prisma.$queryRaw`SELECT count(*)::int as count FROM pg_stat_activity WHERE state = 'active'`;
+        dbConnectionsGauge.set(activeConns[0]?.count || 0);
+
+        const totalConns: any[] = await prisma.$queryRaw`SELECT count(*)::int as count FROM pg_stat_activity`;
+        dbConnectionsTotal.set(totalConns[0]?.count || 0);
+
+        const uptime: any[] = await prisma.$queryRaw`SELECT EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))::int as uptime FROM pg_postmaster_start_time()`;
+        dbUptimeGauge.set(uptime[0]?.uptime || 0);
+    } catch (err) {
+        console.error("Error fetching DB metrics:", err);
     }
-
-    [rows] = await db.query("SHOW STATUS LIKE 'Connections'");
-    dbConnectionsTotal.set(parseInt(rows[0].Value, 10));
-
-
-    [rows] = await db.query("SHOW GLOBAL STATUS LIKE 'Uptime'");
-    const uptime = parseInt(rows[0].Value, 10) || 0;
-    dbUptimeGauge.set(uptime);
-
-
-    // 🔸 Threads running
-    [rows] = await db.query("SHOW STATUS LIKE 'Threads_running'");
-    dbThreadsRunning.set(parseInt(rows[0].Value, 10));
-
-    // 🔸 Slow queries
-    [rows] = await db.query("SHOW STATUS LIKE 'Slow_queries'");
-    dbSlowQueries.set(parseInt(rows[0].Value, 10));
-
-    // 🔸 Total queries
-    [rows] = await db.query("SHOW STATUS LIKE 'Queries'");
-    dbQueriesTotal.set(parseInt(rows[0].Value, 10));
 }
 
 app.get("/metrics", async (req: Request, res: Response) => {
@@ -149,6 +116,14 @@ app.get('/', (req: Request, res: Response) => {
     res.status(200).json({ message: 'Hello, world! This API is working!' });
 });
 
+app.get('/api/health', (req: Request, res: Response) => {
+    res.status(200).json({ status: true, message: 'Server is running' });
+});
+
+// Public routes (no authentication required)
+app.use("/api/public", publicRoutes);
+
+// Authenticated routes
 app.all('/api/*', isAuthorized);
 
 app.use("/api", index);
@@ -158,13 +133,16 @@ app.use("/api/", general);
 
 initSocket(server);
 
-db.sync().then(() => {
-    registerJobHook();
+prisma.$connect().then(() => {
+    console.log("✅ Connected to PostgreSQL database via Prisma!");
     server.listen(
         config.PORT || 5000,
         config.DEV_HOST || '0.0.0.0',
         () => console.log(`Server is running on http://${config.DEV_HOST}:${config.PORT}`)
     );
-}).catch(err => console.error('Error connecting to the database', err));
+}).catch((err: any) => {
+    console.error('❌ Error connecting to the database', err);
+    process.exit(1);
+});
 
 export default app;

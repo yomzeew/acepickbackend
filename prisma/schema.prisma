@@ -1,0 +1,944 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ──────────────────────────── ENUMS ────────────────────────────
+
+enum UserRole {
+  superadmin
+  admin
+  professional
+  client
+  corperate
+  delivery
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum VerificationType {
+  EMAIL
+  SMS
+  BOTH
+}
+
+enum JobMode {
+  VIRTUAL
+  PHYSICAL
+}
+
+enum PayStatus {
+  unpaid
+  paid
+  refunded
+  released
+}
+
+enum JobStatus {
+  COMPLETED
+  APPROVED
+  DISPUTED
+  PENDING
+  DECLINED
+  ONGOING
+  CANCELLED
+  REJECTED
+}
+
+enum TransactionStatus {
+  success
+  failed
+  pending
+}
+
+enum TransactionType {
+  debit
+  credit
+}
+
+enum TransferStatus {
+  transfer_success @map("success")
+  transfer_failed  @map("failed")
+  transfer_pending @map("pending")
+}
+
+enum ProductTransactionStatus {
+  pt_pending   @map("pending")
+  pt_ordered   @map("ordered")
+  pt_delivered @map("delivered")
+  pt_disputed  @map("disputed")
+}
+
+enum OrderMethod {
+  self_pickup
+  delivery
+}
+
+enum OrderStatus {
+  pending                  @map("pending")
+  paid                     @map("paid")
+  accepted                 @map("accepted")
+  en_route_to_pickup
+  arrived_at_pickup
+  picked_up
+  confirm_pickup
+  in_transit
+  arrived_at_dropoff
+  delivered                @map("delivered")
+  confirm_delivery
+  cancelled                @map("cancelled")
+  disputed                 @map("disputed")
+  expired
+  not_required
+}
+
+enum VehicleType {
+  car
+  bike
+  bus
+  truck
+  keke
+}
+
+enum RiderStatus {
+  busy
+  available
+  suspended
+  inactive
+}
+
+enum CommissionType {
+  percentage
+  fixed
+}
+
+enum CommissionScope {
+  job
+  product
+  cs_delivery @map("delivery")
+  all
+}
+
+enum AccountType {
+  user_wallet
+  platform_escrow
+  platform_revenue
+  payment_gateway
+  professional_wallet
+}
+
+enum EntryCategory {
+  ec_job      @map("job")
+  ec_product  @map("product")
+  ec_delivery @map("delivery")
+}
+
+enum WorkType {
+  BUSY
+  IDLE
+}
+
+enum DisputeStatus {
+  RESOLVED
+  PENDING
+}
+
+enum WalletStatus {
+  active
+  wl_inactive @map("inactive")
+  disabled
+}
+
+enum ActivityStatus {
+  act_success @map("success")
+  act_failed  @map("failed")
+  act_pending @map("pending")
+}
+
+// ──────────────────────────── MODELS ───────────────────────────
+
+model User {
+  id       String     @id @default(uuid()) @db.Uuid
+  email    String     @unique
+  password String
+  fcmToken String?
+  phone    String     @unique
+  status   UserStatus @default(ACTIVE)
+  role     UserRole   @default(client)
+  agreed   Boolean    @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  wallet              Wallet?
+  profile             Profile?
+  location            Location[]
+  onlineUser          OnlineUser?
+  rider               Rider?
+  transactions        Transaction[]
+  activities          Activity[]
+  professionalReviews Review[]             @relation("ProfessionalReviews")
+  clientReviews       Review[]             @relation("ClientReviews")
+  professionalRatings Rating[]             @relation("ProfessionalRatings")
+  clientRatings       Rating[]             @relation("ClientRatings")
+  clientJobs          Job[]                @relation("ClientJobs")
+  professionalJobs    Job[]                @relation("ProfessionalJobs")
+  reportedDisputes    Dispute[]            @relation("ReporterDisputes")
+  partnerDisputes     Dispute[]            @relation("PartnerDisputes")
+  products            Product[]
+  buyerTransactions   ProductTransaction[] @relation("BuyerTransactions")
+  sellerTransactions  ProductTransaction[] @relation("SellerTransactions")
+  riderOrders         Order[]              @relation("RiderOrders")
+  ledgerEntries       LedgerEntry[]
+  notifications       Notification[]
+
+  @@map("users")
+}
+
+model Profile {
+  id                 Int       @id @default(autoincrement())
+  firstName          String    @db.VarChar(50)
+  lastName           String    @db.VarChar(50)
+  gender             String?   @db.VarChar(20)
+  fcmToken           String?
+  avatar             String?
+  birthDate          DateTime? @db.Date
+  verified           Boolean   @default(true)
+  notified           Boolean   @default(false)
+  totalJobs          Int       @default(0)
+  totalExpense       Int       @default(0)
+  rate               Decimal?  @default(0)
+  totalJobsDeclined  Int       @default(0)
+  totalJobsPending   Int       @default(0)
+  count              Int       @default(0)
+  totalJobsOngoing   Int       @default(0)
+  totalJobsCompleted Int       @default(0)
+  totalReview        Int       @default(0)
+  totalJobsApproved  Int       @default(0)
+  totalJobsCanceled  Int       @default(0)
+  totalDisputes      Int       @default(0)
+  bvn                String?
+  bvnVerified        Boolean?
+  switch             Boolean?  @default(false)
+  store              Boolean?  @default(false)
+  position           String?   @db.VarChar(50)
+
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  professional  Professional?
+  cooperation   Cooperation?
+  voiceRecords  VoiceRecording[]
+  education     Education[]
+  experience    Experience[]
+  certifications Certification[]
+  portfolios    Portfolio[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model Professional {
+  id                        Int      @id @default(autoincrement())
+  file                      String?  @db.VarChar(500)
+  intro                     String?
+  chargeFrom                Decimal?
+  language                  String?  @default("English") @db.VarChar(100)
+  available                 Boolean? @default(true)
+  workType                  WorkType @default(IDLE)
+  totalEarning              Int      @default(0)
+  completedAmount           Decimal  @default(0) @db.Decimal(10, 2)
+  pendingAmount             Decimal  @default(0)
+  rejectedAmount            Decimal  @default(0)
+  availableWithdrawalAmount Decimal  @default(0)
+  regNum                    String?
+  yearsOfExp                Int?
+  online                    Boolean  @default(false)
+
+  profileId    Int        @unique
+  profile      Profile    @relation(fields: [profileId], references: [id])
+  professionId Int
+  profession   Profession @relation(fields: [professionId], references: [id])
+  
+  // Relations
+  professionalSkills ProfessionalSkill[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("professionals")
+}
+
+model Profession {
+  id    Int    @id @default(autoincrement())
+  title String
+  image String @default("")
+
+  sectorId Int
+  sector   Sector @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+
+  professionals Professional[]
+  cooperations  Cooperation[]
+
+  @@map("professions")
+}
+
+model Sector {
+  id    Int    @id @default(autoincrement())
+  title String
+  image String
+
+  professions Profession[]
+
+  @@map("sectors")
+}
+
+model Job {
+  id                     Int        @id @default(autoincrement())
+  description            String?
+  title                  String?
+  accepted               Boolean    @default(false)
+  approved               Boolean    @default(false)
+  mode                   JobMode?   @default(VIRTUAL)
+  state                  String?
+  lga                    String?
+  fullAddress            String?
+  long                   Float?
+  total                  Int?
+  departureDaysCount     Int?       @default(0)
+  arrivalDaysCount       Int?       @default(0)
+  clientLocation         Json?
+  clientLocationArrival  Json?
+  clientLocationDeparture Json?
+  isLocationMatch        Boolean?   @default(false)
+  payStatus              PayStatus? @default(unpaid)
+  paymentRef             String?    @db.VarChar(200)
+  workmanship            Decimal?   @db.Decimal(10, 2)
+  materialsCost          Decimal?   @db.Decimal(10, 2)
+  numOfJobs              Int?       @default(0)
+  isMaterial             Boolean?
+  lan                    Float?
+  durationUnit           String?
+  reason                 String?
+  durationValue          Int?
+  status                 JobStatus  @default(PENDING)
+  sectorId               Int?
+  // Additional fields from frontend
+  categoryId             String?
+  startDate              DateTime?
+  deadline               DateTime?
+  budgetMin              Decimal?   @db.Decimal(10, 2)
+  budgetMax              Decimal?   @db.Decimal(10, 2)
+  priority               String?    @default("NORMAL")
+
+  clientId       String @db.Uuid
+  client         User   @relation("ClientJobs", fields: [clientId], references: [id])
+  professionalId String @db.Uuid
+  professional   User   @relation("ProfessionalJobs", fields: [professionalId], references: [id])
+
+  disputes     Dispute[]
+  transactions Transaction[]
+  materials    Material[]
+  reviews      Review[]
+  ratings      Rating[]
+  jobSkills    JobSkill[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("jobs")
+}
+
+model Wallet {
+  id              BigInt       @id @default(autoincrement())
+  previousBalance Decimal      @default(0)
+  currentBalance  Decimal      @default(0)
+  currency        String       @default("NGN") @db.VarChar(50)
+  pin             String?
+  status          WalletStatus @default(active)
+
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id          BigInt            @id @default(autoincrement())
+  amount      Decimal           @db.Decimal(10, 2)
+  type        TransactionType   @default(credit)
+  status      TransactionStatus
+  channel     String?
+  currency    String            @default("NGN")
+  timestamp   DateTime
+  description String?
+  reference   String?           @unique @db.VarChar(200)
+
+  jobId                Int?
+  job                  Job?                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  productTransactionId Int?
+  productTransaction   ProductTransaction? @relation(fields: [productTransactionId], references: [id], onDelete: Cascade)
+  userId               String              @db.Uuid
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  ledgerEntries LedgerEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("transactions")
+}
+
+model Account {
+  id            BigInt @id @default(autoincrement())
+  name          String
+  number        String @unique @db.VarChar(20)
+  bank          String
+  recipientCode String
+  currency      String @db.VarChar(10)
+  userId        String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("accounts")
+}
+
+model Activity {
+  id     BigInt         @id @default(autoincrement())
+  type   String         @db.VarChar(50)
+  action String
+  status ActivityStatus @default(act_success)
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("activities")
+}
+
+model Certification {
+  id           Int      @id @default(autoincrement())
+  title        String
+  filePath     String
+  companyIssue String
+  date         DateTime
+
+  profileId Int
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("certifications")
+}
+
+model ChatRoom {
+  id      BigInt @id @default(autoincrement())
+  name    String
+  members String
+
+  messages Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("chat_rooms")
+}
+
+model Commission {
+  id            BigInt          @id @default(autoincrement())
+  name          String
+  rate          Decimal?        @db.Decimal(5, 4)
+  type          CommissionType  @default(percentage)
+  fixedAmount   Decimal?        @db.Decimal(10, 2)
+  minAmount     Decimal?        @default(0) @db.Decimal(10, 2)
+  appliesTo     CommissionScope
+  active        Boolean
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("commissions")
+}
+
+model Cooperation {
+  id            Int     @id @default(autoincrement())
+  nameOfOrg     String
+  phone         String
+  regNum        String?
+  noOfEmployees String?
+
+  professionId Int?
+  profession   Profession? @relation(fields: [professionId], references: [id], onDelete: Cascade)
+  profileId    Int         @unique
+  profile      Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  director Director?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("cooperations")
+}
+
+model Director {
+  id        Int     @id @default(autoincrement())
+  firstName String  @db.VarChar(50)
+  lastName  String  @db.VarChar(50)
+  email     String  @db.VarChar(100)
+  phone     String  @db.VarChar(50)
+  address   String?
+  state     String?
+  lga       String?
+  bvn       String? @db.VarChar(20)
+
+  cooperateId Int         @unique
+  cooperation Cooperation @relation(fields: [cooperateId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("directors")
+}
+
+model Dispute {
+  id          Int           @id @default(autoincrement())
+  reason      String
+  description String        @db.Text
+  status      DisputeStatus @default(PENDING)
+  url         String?
+
+  jobId                Int?
+  job                  Job?                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  productTransactionId Int?
+  productTransaction   ProductTransaction? @relation(fields: [productTransactionId], references: [id], onDelete: Cascade)
+  reporterId           String?             @db.Uuid
+  reporter             User?               @relation("ReporterDisputes", fields: [reporterId], references: [id], onDelete: Cascade)
+  partnerId            String?             @db.Uuid
+  partner              User?               @relation("PartnerDisputes", fields: [partnerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("disputes")
+}
+
+model Education {
+  id         Int       @id @default(autoincrement())
+  school     String
+  degreeType String
+  course     String
+  startDate  DateTime
+  gradDate   DateTime?
+  isCurrent  Boolean?  @default(false)
+
+  profileId Int
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("education")
+}
+
+model Experience {
+  id          Int       @id @default(autoincrement())
+  postHeld    String
+  workPlace   String
+  startDate   DateTime
+  endDate     DateTime?
+  isCurrent   Boolean?  @default(false)
+  description String?   @db.Text
+
+  profileId Int
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("experiences")
+}
+
+model Location {
+  id        Int    @id @default(autoincrement())
+  address   String?
+  city      String?
+  lga       String?
+  state     String?
+  country   String?
+  latitude  Float?
+  longitude Float?
+  zipcode   Int?
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  products Product[]
+  orders   Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("locations")
+}
+
+model Material {
+  id          Int     @id @default(autoincrement())
+  description String
+  quantity    Int
+  unit        String? @db.VarChar(20)
+  subTotal    Int?
+  price       Int
+
+  jobId Int
+  job   Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("materials")
+}
+
+model Message {
+  id        BigInt   @id @default(autoincrement())
+  from      String   @db.Uuid
+  text      String   @db.Text
+  isDeleted Boolean  @default(false)
+  timestamp DateTime
+
+  chatroomId BigInt
+  chatroom   ChatRoom @relation(fields: [chatroomId], references: [id])
+
+  @@map("messages")
+}
+
+model OnlineUser {
+  userId     String   @id @db.Uuid
+  socketId   String
+  lastActive DateTime
+  isOnline   Boolean  @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("online_users")
+}
+
+model Order {
+  id              Int         @id @default(autoincrement())
+  status          OrderStatus @default(pending)
+  cost            Decimal     @default(0) @db.Decimal(10, 2)
+  distance        Decimal     @db.Decimal(10, 2)
+  weight          Decimal?    @db.Decimal(10, 2)
+  deliveryFee     Decimal?    @db.Decimal(10, 2)
+  pickupAddress   String?
+  deliveryAddress String?
+  expiresAt       DateTime?
+  assignedAt      DateTime?
+
+  productTransactionId Int @unique
+  productTransaction   ProductTransaction @relation(fields: [productTransactionId], references: [id])
+  locationId           Int
+  dropoffLocation      Location           @relation(fields: [locationId], references: [id])
+  riderId              String?            @db.Uuid
+  rider                User?              @relation("RiderOrders", fields: [riderId], references: [id])
+
+  reviews Review[]
+  ratings Rating[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, riderId])
+  @@map("orders")
+}
+
+model Portfolio {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String
+  duration    String   @db.VarChar(50)
+  date        DateTime
+  file        String?  @db.VarChar(500)
+
+  profileId Int
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("portfolios")
+}
+
+model Product {
+  id            Int      @id @default(autoincrement())
+  name          String
+  description   String?  @db.Text
+  images        String?  @db.Text
+  weightPerUnit Decimal? @db.Decimal(10, 2)
+  quantity      Int      @default(1)
+  price         Decimal  @db.Decimal(10, 2)
+  approved      Boolean?
+  discount      Float?
+
+  categoryId Int
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id])
+  locationId Int?
+  pickupLocation Location? @relation(fields: [locationId], references: [id])
+
+  productTransactions ProductTransaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("products")
+}
+
+model ProductTransaction {
+  id          Int                      @id @default(autoincrement())
+  quantity    Int                      @default(1)
+  price       Decimal                  @db.Decimal(10, 2)
+  status      ProductTransactionStatus @default(pt_pending)
+  orderMethod OrderMethod              @default(self_pickup)
+  date        DateTime
+
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  buyerId   String  @db.Uuid
+  buyer     User    @relation("BuyerTransactions", fields: [buyerId], references: [id])
+  sellerId  String  @db.Uuid
+  seller    User    @relation("SellerTransactions", fields: [sellerId], references: [id])
+
+  order        Order?
+  transactions Transaction[]
+  disputes     Dispute[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("product_transactions")
+}
+
+model Rider {
+  id            Int         @id @default(autoincrement())
+  vehicleType   VehicleType @default(bike)
+  licenseNumber String
+  status        RiderStatus
+
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("riders")
+}
+
+model Review {
+  id   BigInt @id @default(autoincrement())
+  text String
+
+  professionalUserId String? @db.Uuid
+  professionalUser   User?   @relation("ProfessionalReviews", fields: [professionalUserId], references: [id], onDelete: Cascade)
+  clientUserId       String? @db.Uuid
+  clientUser         User?   @relation("ClientReviews", fields: [clientUserId], references: [id], onDelete: Cascade)
+  jobId              Int?
+  job                Job?    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  orderId            Int?
+  order              Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("reviews")
+}
+
+model Rating {
+  id    BigInt @id @default(autoincrement())
+  value Int
+
+  professionalUserId String? @db.Uuid
+  professionalUser   User?   @relation("ProfessionalRatings", fields: [professionalUserId], references: [id], onDelete: Cascade)
+  clientUserId       String? @db.Uuid
+  clientUser         User?   @relation("ClientRatings", fields: [clientUserId], references: [id], onDelete: Cascade)
+  jobId              Int?
+  job                Job?    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  orderId            Int?
+  order              Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ratings")
+}
+
+model Transfer {
+  id            BigInt         @id @default(autoincrement())
+  amount        Decimal
+  status        TransferStatus @default(transfer_pending)
+  currency      String         @default("NGN")
+  timestamp     DateTime
+  reason        String
+  reference     String         @unique @db.VarChar(200)
+  recipientCode String         @db.VarChar(200)
+  userId        String         @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("transfers")
+}
+
+model Verify {
+  id       Int              @id @default(autoincrement())
+  contact  String
+  code     String
+  verified Boolean?         @default(false)
+  type     VerificationType @default(EMAIL)
+
+  createdAt DateTime @default(now())
+
+  @@map("verify")
+}
+
+model VoiceRecording {
+  id       Int    @id @default(autoincrement())
+  url      String?
+  duration Int?
+
+  profileId Int?
+  profile   Profile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("voicerecords")
+}
+
+model DeliveryPricing {
+  id          Int         @id @default(autoincrement())
+  vehicleType VehicleType
+  baseCost    Decimal     @db.Decimal(10, 2)
+  costPerKm   Decimal     @db.Decimal(10, 2)
+  costPerKg   Decimal?    @default(0) @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("delivery_pricing")
+}
+
+model LedgerEntry {
+  id       BigInt          @id @default(autoincrement())
+  amount   Decimal
+  type     TransactionType @default(credit)
+  account  AccountType
+  category EntryCategory?
+
+  transactionId BigInt
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  userId        String?     @db.Uuid
+  user          User?       @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ledger_entries")
+}
+
+model Category {
+  id          Int     @id @default(autoincrement())
+  name        String
+  description String? @db.Text
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Skill {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  description String? @db.Text
+  category    String? // e.g., "Technical", "Creative", "Service", "Business"
+
+  // Relations
+  professionalSkills ProfessionalSkill[]
+  jobSkills          JobSkill[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("skills")
+}
+
+model ProfessionalSkill {
+  id           Int @id @default(autoincrement())
+  professionalId Int
+  skillId      Int
+  proficiency  String? // e.g., "Beginner", "Intermediate", "Advanced", "Expert"
+  yearsOfExp   Int?    // Years of experience with this skill
+
+  professional Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  skill        Skill        @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([professionalId, skillId])
+  @@map("professional_skills")
+}
+
+model JobSkill {
+  id     Int @id @default(autoincrement())
+  jobId  Int
+  skillId Int
+
+  job   Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, skillId])
+  @@map("job_skills")
+}
+
+// ──────────────────────────── NOTIFICATIONS ─────────────────────
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    String   @db.Uuid
+  type      String   @db.VarChar(50)   // job, order, payment, chat, system, profile
+  title     String   @db.VarChar(255)
+  message   String   @db.Text
+  data      Json?                       // arbitrary metadata (jobId, orderId, etc.)
+  read      Boolean  @default(false)
+  pushSent  Boolean  @default(false)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}

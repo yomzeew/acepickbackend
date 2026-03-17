@@ -9,6 +9,7 @@ import { getMonthlyRevenue, getMonthlyRevenueByCategory, getMonthlyRevenueWithCu
 import { avgRating, getJobStats, getOrderStats } from "../controllers/admin/service_analytics";
 import { getAllTransactions, transactionStat } from "../controllers/admin/transaction";
 import { deactivateUser, reactivateUser, suspendUser } from "../controllers/admin/professional";
+import { getDeliveryPricingList, getDeliveryPricingById, createDeliveryPricing, updateDeliveryPricing, deleteDeliveryPricing } from "../controllers/admin/deliveryPricing";
 
 const routes = Router();
 
@@ -51,5 +52,11 @@ routes.post('/commission', createCommission);
 routes.put('/commission/:id', updateCommission);
 routes.delete('/commission/:id', deleteCommission);
 routes.post('/toggle-commission/:id', toggleCommission);
+
+routes.get('/delivery-pricing', getDeliveryPricingList);
+routes.get('/delivery-pricing/:id', getDeliveryPricingById);
+routes.post('/delivery-pricing', createDeliveryPricing);
+routes.put('/delivery-pricing/:id', updateDeliveryPricing);
+routes.delete('/delivery-pricing/:id', deleteDeliveryPricing);
 
 export default routes;

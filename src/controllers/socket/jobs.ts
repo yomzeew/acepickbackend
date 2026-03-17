@@ -1,20 +1,20 @@
 import { Server, Socket } from "socket.io";
 import { JobStatus, UserRole } from "../../utils/enum";
-import { Job, Material } from "../../models/Models";
+import prisma from "../../config/prisma";
 
 export const emitLatestJob = async (io: Server, socket: Socket) => {
     const { id, role } = socket.user;
 
     if (role === UserRole.PROFESSIONAL) {
         try {
-            const job = await Job.findOne({
+            const job = await prisma.job.findFirst({
                 where: {
                     professionalId: id,
-                    status: JobStatus.PENDING,
+                    status: JobStatus.PENDING as any,
                     accepted: false
                 },
-                order: [['createdAt', 'DESC']],
-                include: [Material]
+                orderBy: { createdAt: 'desc' },
+                include: { materials: true }
             })
 
             if (job) {

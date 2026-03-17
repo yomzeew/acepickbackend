@@ -13,45 +13,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getOrderStats = exports.avgRating = exports.getJobStats = void 0;
-const Job_1 = require("../../models/Job");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const enum_1 = require("../../utils/enum");
 const modules_1 = require("../../utils/modules");
-const Models_1 = require("../../models/Models");
-const db_1 = __importDefault(require("../../config/db"));
 const getJobStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     console.log("Fetching job statistics...");
     try {
-        const totalJobs = yield Job_1.Job.count();
-        const pendingJobs = yield Job_1.Job.count({
-            where: {
-                status: enum_1.JobStatus.PENDING
-            }
-        });
-        const ongoingJobs = yield Job_1.Job.count({
-            where: {
-                status: enum_1.JobStatus.ONGOING
-            }
-        });
-        const completedJobs = yield Job_1.Job.count({
-            where: {
-                status: enum_1.JobStatus.COMPLETED
-            }
-        });
-        const rejectedJobs = yield Job_1.Job.count({
-            where: {
-                status: enum_1.JobStatus.REJECTED
-            }
-        });
-        const approvedJobs = yield Job_1.Job.count({
-            where: {
-                status: enum_1.JobStatus.APPROVED
-            }
-        });
-        const disputedJobs = yield Job_1.Job.count({
-            where: {
-                status: enum_1.JobStatus.DISPUTED
-            }
-        });
+        const totalJobs = yield prisma_1.default.job.count();
+        const pendingJobs = yield prisma_1.default.job.count({ where: { status: enum_1.JobStatus.PENDING } });
+        const ongoingJobs = yield prisma_1.default.job.count({ where: { status: enum_1.JobStatus.ONGOING } });
+        const completedJobs = yield prisma_1.default.job.count({ where: { status: enum_1.JobStatus.COMPLETED } });
+        const rejectedJobs = yield prisma_1.default.job.count({ where: { status: enum_1.JobStatus.REJECTED } });
+        const approvedJobs = yield prisma_1.default.job.count({ where: { status: enum_1.JobStatus.APPROVED } });
+        const disputedJobs = yield prisma_1.default.job.count({ where: { status: enum_1.JobStatus.DISPUTED } });
         return (0, modules_1.successResponse)(res, 'success', {
             totalJobs,
             pendingJobs,
@@ -70,14 +44,14 @@ const getJobStats = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.getJobStats = getJobStats;
 const avgRating = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const avgRating = yield Models_1.Rating.findOne({
-            attributes: [[db_1.default.fn('AVG', db_1.default.col('value')), 'avgRating']],
-            raw: true,
+        const ratingAgg = yield prisma_1.default.rating.aggregate({
+            _avg: { value: true }
         });
-        if (!avgRating || !avgRating.avgRating) {
+        const avg = ratingAgg._avg.value;
+        if (!avg) {
             return (0, modules_1.successResponse)(res, 'success', { avgRating: 0 });
         }
-        return (0, modules_1.successResponse)(res, 'success', { avgRating: parseFloat(Number(avgRating.avgRating).toFixed(2)) });
+        return (0, modules_1.successResponse)(res, 'success', { avgRating: parseFloat(Number(avg).toFixed(2)) });
     }
     catch (error) {
         console.log(error);
@@ -87,47 +61,15 @@ const avgRating = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 exports.avgRating = avgRating;
 const getOrderStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const totalOrders = yield Models_1.Order.count();
-        const pendingOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.PENDING
-            }
-        });
-        const acceptedOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.ACCEPTED
-            }
-        });
-        const paidOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.PAID
-            }
-        });
-        const pickedUpOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.PICKED_UP
-            }
-        });
-        const inTransitOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.IN_TRANSIT
-            }
-        });
-        const deliveredOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.DELIVERED
-            }
-        });
-        const confirmedDeliveryOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.CONFIRM_DELIVERY
-            }
-        });
-        const cancelledOrders = yield Models_1.Order.count({
-            where: {
-                status: enum_1.OrderStatus.CANCELLED
-            }
-        });
+        const totalOrders = yield prisma_1.default.order.count();
+        const pendingOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.PENDING } });
+        const acceptedOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.ACCEPTED } });
+        const paidOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.PAID } });
+        const pickedUpOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.PICKED_UP } });
+        const inTransitOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.IN_TRANSIT } });
+        const deliveredOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.DELIVERED } });
+        const confirmedDeliveryOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.CONFIRM_DELIVERY } });
+        const cancelledOrders = yield prisma_1.default.order.count({ where: { status: enum_1.OrderStatus.CANCELLED } });
         return (0, modules_1.successResponse)(res, 'success', {
             totalOrders,
             pendingOrders,

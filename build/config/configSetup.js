@@ -48,6 +48,8 @@ const getConfig = () => {
         DB_HOST: process.env.DB_HOST,
         DB_PORT: Number(process.env.DB_PORT),
         DB_DIALECT: process.env.DB_DIALECT,
+        DATABASE_URL: process.env.DATABASE_URL,
+        DIRECT_URL: process.env.DIRECT_URL,
         EMAIL_SERVICE: process.env.EMAIL_SERVICE,
         EMAIL_PORT: Number(process.env.EMAIL_PORT),
         EMAIL_USER: process.env.EMAIL_USER,
@@ -60,12 +62,17 @@ const getConfig = () => {
         REDIS_HOST: process.env.REDIS_HOST,
         REDIS_PORT: Number(process.env.REDIS_PORT) || 6379,
         REDIS_PASSWORD: process.env.REDIS_PASSWORD,
-        SMS_API_KEY: process.env.SMS_API_KEY,
-        SMS_SENDER_ID: process.env.SMS_SENDER_ID,
+        TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,
+        TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN,
+        TWILIO_PHONE_NUMBER: process.env.TWILIO_PHONE_NUMBER,
+        TWILIO_WHATSAPP_NUMBER: process.env.TWILIO_WHATSAPP_NUMBER,
         AZURE_STORAGE_CONNECTION_STRING: process.env.AZURE_STORAGE_CONNECTION_STRING,
         PAYSTACK_SECRET_KEY: process.env.PAYSTACK_SECRET_KEY,
         CRYPTO_SECRET_KEY: process.env.CRYPTO_SECRET_KEY,
         CRYPTO_IV: process.env.CRYPTO_IV,
+        SUPABASE_URL: process.env.SUPABASE_URL,
+        SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
+        SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
         PUBLIC_ROUTES: [
             '/api',
             '/',
@@ -79,6 +86,7 @@ const getConfig = () => {
             '/api/auth/register-rider',
             '/api/sectors',
             '/api/professions',
+            '/api/professionals',
             '/api/auth/change-password-forgot',
             '/api/delete-users',
             '/api/auth/send-otp',
@@ -97,14 +105,17 @@ const getConfig = () => {
             "/api/admin/register",
             "/api/admin/login",
             "/api/paystack/webhook",
-            "/api/auth/verify/webhook"
+            "/api/auth/verify/webhook",
+            "/api/public/products",
+            "/api/public/categories"
         ],
     };
 };
 const getSanitzedConfig = (config) => {
+    const requiredKeys = ['PORT', 'DATABASE_URL', 'DIRECT_URL', 'TOKEN_SECRET'];
     for (const [key, value] of Object.entries(config)) {
-        if (value === undefined) {
-            throw new Error(`Missing key ${key} in .env`);
+        if (value === undefined && requiredKeys.includes(key)) {
+            throw new Error(`Missing required key ${key} in .env`);
         }
     }
     return config;

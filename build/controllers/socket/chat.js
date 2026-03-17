@@ -14,180 +14,142 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uploadFile = exports.getPrevChats = exports.getMsgs = exports.joinRoom = exports.getContacts = exports.onDisconnect = exports.onConnect = exports.sendMessage = void 0;
 const events_1 = require("../../utils/events");
-const Models_1 = require("../../models/Models");
-const sequelize_1 = require("sequelize");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const modules_1 = require("../../utils/modules");
 const path_1 = __importDefault(require("path"));
-const fs_1 = __importDefault(require("fs"));
 const cryptography_1 = require("../../utils/cryptography");
 const enum_1 = require("../../utils/enum");
 const notification_1 = require("../../services/notification");
+const supabaseStorage_1 = require("../../services/supabaseStorage");
+const supabase_1 = require("../../config/supabase");
 const sendMessage = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
-    let room = yield Models_1.ChatRoom.findOne({
-        where: {
-            name: data.room
-        }
-    });
+    let room = yield prisma_1.default.chatRoom.findFirst({ where: { name: data.room } });
     if (!room) {
         return;
     }
-    const message = yield Models_1.Message.create({
-        text: (0, cryptography_1.encryptMessage)(data.text),
-        from: data.from,
-        timestamp: new Date(),
-        chatroomId: room === null || room === void 0 ? void 0 : room.id
+    const message = yield prisma_1.default.message.create({
+        data: {
+            text: (0, cryptography_1.encryptMessage)(data.text),
+            from: data.from,
+            timestamp: new Date(),
+            chatroomId: room.id
+        }
     });
     let to = room.members.split(",").filter((member) => member !== data.from)[0];
-    let otherUser = yield Models_1.User.findOne({
-        where: {
-            id: to
-        },
-        include: [Models_1.OnlineUser]
+    let otherUser = yield prisma_1.default.user.findUnique({
+        where: { id: to },
+        include: { onlineUser: true }
     });
-    if (otherUser && !otherUser.onlineUser.isOnline) {
-        //send push notification
-        let user = yield Models_1.User.findOne({
-            where: {
-                userId: data.from
-            },
-            include: [Models_1.Profile]
+    if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
+        let user = yield prisma_1.default.user.findFirst({
+            where: { id: data.from },
+            include: { profile: true }
         });
-        yield (0, notification_1.sendPushNotification)(otherUser.fcmToken, `${(_a = user === null || user === void 0 ? void 0 : user.profile) === null || _a === void 0 ? void 0 : _a.firstName} ${(_b = user === null || user === void 0 ? void 0 : user.profile) === null || _b === void 0 ? void 0 : _b.lastName} sent you a message`, data.text, {});
+        const senderName = `${(_a = user === null || user === void 0 ? void 0 : user.profile) === null || _a === void 0 ? void 0 : _a.firstName} ${(_b = user === null || user === void 0 ? void 0 : user.profile) === null || _b === void 0 ? void 0 : _b.lastName}`;
+        yield notification_1.NotificationService.create({
+            userId: to,
+            type: enum_1.NotificationType.CHAT,
+            title: `${senderName} sent you a message`,
+            message: data.text,
+            data: { type: 'chat', roomName: room.name, senderId: data.from, senderName },
+        });
     }
     io.to(room.name).emit(events_1.Emit.RECV_MSG, Object.assign(Object.assign({}, data), { timestamp: message.timestamp }));
 });
 exports.sendMessage = sendMessage;
 const onConnect = (socket) => __awaiter(void 0, void 0, void 0, function* () {
     console.log('a user connected', socket.id);
-    const [onlineuser, created] = yield Models_1.OnlineUser.findOrCreate({
-        where: { userId: socket.user.id },
-        defaults: {
-            socketId: socket.id,
-            lastActive: new Date(),
-            isOnline: true,
+    try {
+        // Validate that user exists before creating online user record
+        const user = yield prisma_1.default.user.findUnique({ where: { id: socket.user.id } });
+        if (!user) {
+            console.warn('❌ User not found for socket connection:', socket.user.id);
+            socket.disconnect();
+            return;
         }
-    });
-    if (!created) {
-        onlineuser.socketId = socket.id;
-        onlineuser.lastActive = new Date();
-        onlineuser.isOnline = true;
-        yield onlineuser.save();
+        const existing = yield prisma_1.default.onlineUser.findFirst({ where: { userId: socket.user.id } });
+        if (existing) {
+            yield prisma_1.default.onlineUser.update({
+                where: { userId: existing.userId },
+                data: { socketId: socket.id, lastActive: new Date(), isOnline: true }
+            });
+        }
+        else {
+            yield prisma_1.default.onlineUser.create({
+                data: { userId: socket.user.id, socketId: socket.id, lastActive: new Date(), isOnline: true }
+            });
+        }
     }
-    //global.onlineUsers[socket.user.id] = socket.id
-    const chatrooms = yield Models_1.ChatRoom.findAll({
-        where: {
-            members: {
-                [sequelize_1.Op.like]: `%${socket.user.id}%`
-            }
-        }
+    catch (error) {
+        console.error('❌ Socket connection error:', error);
+        // Don't crash the server, just log the error
+        socket.disconnect();
+    }
+    const chatrooms = yield prisma_1.default.chatRoom.findMany({
+        where: { members: { contains: socket.user.id } }
     });
     chatrooms.forEach((chatroom) => __awaiter(void 0, void 0, void 0, function* () {
         socket.join(chatroom.name);
     }));
-    //emit latest job
-    //await emitLatestJob(io, socket);
 });
 exports.onConnect = onConnect;
 const onDisconnect = (socket) => __awaiter(void 0, void 0, void 0, function* () {
     console.log(`User disconnected: ${socket.id}`);
-    const onlineUser = yield Models_1.OnlineUser.findOne({ where: { userId: socket.user.id } });
+    const onlineUser = yield prisma_1.default.onlineUser.findFirst({ where: { userId: socket.user.id } });
     if (onlineUser) {
-        onlineUser.isOnline = false;
-        onlineUser.lastActive = new Date();
-        yield onlineUser.save();
+        yield prisma_1.default.onlineUser.update({
+            where: { userId: onlineUser.userId },
+            data: { isOnline: false, lastActive: new Date() }
+        });
     }
 });
 exports.onDisconnect = onDisconnect;
 const getContacts = (io, socket) => __awaiter(void 0, void 0, void 0, function* () {
-    let token = socket.handshake.auth.token;
     const user = socket.user;
     if (!user) {
         return;
     }
-    let contacts;
-    // if (user.role === UserRole.CLIENT) {
-    //     contacts = await User.findAll({
-    //         attributes: { exclude: ['password'] },
-    //         where: {
-    //             [Op.and]: [
-    //                 { role: UserRole.PROFESSIONAL },
-    //                 { [Op.not]: [{ id: user.id }] }
-    //             ],
-    //         },
-    //         include: [{
-    //             model: Profile,
-    //             include: [{
-    //                 model: Professional,
-    //                 include: [Profession]
-    //             }]
-    //         }, {
-    //             model: Location
-    //         }]
-    //     })
-    // } else if (user.role === UserRole.PROFESSIONAL) {
-    //     contacts = await User.findAll({
-    //         attributes: { exclude: ['password'] },
-    //         where: {
-    //             [Op.and]: [
-    //                 { role: UserRole.CLIENT },
-    //                 { [Op.not]: [{ id: user.id }] }
-    //             ],
-    //         },
-    //         include: [{
-    //             model: Profile,
-    //         }, {
-    //             model: Location
-    //         }]
-    //     })
-    // }
-    contacts = yield Models_1.User.findAll({
-        attributes: { exclude: ['password'] },
+    const contacts = yield prisma_1.default.user.findMany({
         where: {
-            [sequelize_1.Op.not]: [{ id: user.id, role: enum_1.UserRole.PROFESSIONAL }]
+            NOT: { id: user.id },
         },
-        include: [{
-                model: Models_1.Profile,
-                include: [{
-                        model: Models_1.Professional,
-                        include: [Models_1.Profession]
-                    }]
-            }, {
-                model: Models_1.Location
-            }]
+        select: {
+            id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
+            profile: {
+                include: {
+                    professional: { include: { profession: true } }
+                }
+            },
+            location: true,
+        }
     });
     socket.emit(events_1.Emit.ALL_CONTACTS, contacts);
 });
 exports.getContacts = getContacts;
 const joinRoom = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
     console.log("join room", data);
-    //get the ids
-    let room = yield Models_1.ChatRoom.findOne({
+    let room = yield prisma_1.default.chatRoom.findFirst({
         where: {
-            [sequelize_1.Op.and]: [{
-                    members: {
-                        [sequelize_1.Op.like]: `%${socket.user.id}%`
-                    }
-                }, {
-                    members: {
-                        [sequelize_1.Op.like]: `%${data.contactId}%`
-                    }
-                }],
+            AND: [
+                { members: { contains: socket.user.id } },
+                { members: { contains: data.contactId } }
+            ]
         }
     });
     if (!room) {
-        room = yield Models_1.ChatRoom.create({
-            name: (0, modules_1.randomId)(12),
-            members: `${socket.user.id},${data.contactId}`
+        room = yield prisma_1.default.chatRoom.create({
+            data: {
+                name: (0, modules_1.randomId)(12),
+                members: `${socket.user.id},${data.contactId}`
+            }
         });
     }
     const existingRoom = io.of("/").adapter.rooms.get(room.name);
     if (!(existingRoom === null || existingRoom === void 0 ? void 0 : existingRoom.has(socket.id)))
         socket.join(room.name);
-    const onlineUser = yield Models_1.OnlineUser.findOne({
-        where: {
-            userId: data.contactId
-        }
+    const onlineUser = yield prisma_1.default.onlineUser.findFirst({
+        where: { userId: data.contactId }
     });
     if (onlineUser) {
         const sid = onlineUser.socketId;
@@ -201,13 +163,9 @@ const joinRoom = (io, socket, data) => __awaiter(void 0, void 0, void 0, functio
 });
 exports.joinRoom = joinRoom;
 const getMsgs = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
-    const chatroom = yield Models_1.ChatRoom.findOne({
-        where: {
-            name: data.room
-        },
-        include: [{
-                model: Models_1.Message,
-            }]
+    const chatroom = yield prisma_1.default.chatRoom.findFirst({
+        where: { name: data.room },
+        include: { messages: true }
     });
     const members = chatroom === null || chatroom === void 0 ? void 0 : chatroom.members.split(",");
     const normalizedMessages = [];
@@ -223,43 +181,32 @@ const getMsgs = (io, socket, data) => __awaiter(void 0, void 0, void 0, function
 });
 exports.getMsgs = getMsgs;
 const getPrevChats = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
-    const chatrooms = yield Models_1.ChatRoom.findAll({
-        where: {
-            members: {
-                [sequelize_1.Op.like]: `%${socket.user.id}%`
-            }
-        }
+    const chatrooms = yield prisma_1.default.chatRoom.findMany({
+        where: { members: { contains: socket.user.id } }
     });
     const partners = chatrooms.map((room) => {
         const members = room.members.split(",");
         return members.filter((member) => member !== socket.user.id)[0];
     });
-    const prevChats = yield Models_1.User.findAll({
-        attributes: { exclude: ['password'] },
-        where: {
-            id: partners
-        },
-        include: [{
-                model: Models_1.Profile,
-                include: [{
-                        model: Models_1.Professional,
-                        include: [Models_1.Profession]
-                    }]
-            }, {
-                model: Models_1.Location
-            }, {
-                model: Models_1.OnlineUser
-            }]
+    const prevChats = yield prisma_1.default.user.findMany({
+        where: { id: { in: partners } },
+        select: {
+            id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
+            profile: {
+                include: {
+                    professional: { include: { profession: true } }
+                }
+            },
+            location: true,
+            onlineUser: true,
+        }
     });
     socket.emit(events_1.Emit.GOT_PREV_CHATS, prevChats);
 });
 exports.getPrevChats = getPrevChats;
 const uploadFile = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     const { image, fileName } = data;
-    const uploadDir = path_1.default.join(__dirname, "../../../public/uploads");
-    if (!fs_1.default.existsSync(uploadDir)) {
-        fs_1.default.mkdirSync(uploadDir);
-    }
     const fileExt = path_1.default.extname(fileName).toLowerCase();
     const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
     const documentExtensions = [".pdf", ".doc", ".docx", ".txt", ".xlsx"];
@@ -270,30 +217,55 @@ const uploadFile = (io, socket, data) => __awaiter(void 0, void 0, void 0, funct
     else if (documentExtensions.includes(fileExt)) {
         tag = '<doc>';
     }
-    const filePath = path_1.default.join(uploadDir, `${Date.now()}-${fileName}`);
-    fs_1.default.writeFile(filePath, Buffer.from(image), (err) => __awaiter(void 0, void 0, void 0, function* () {
-        if (err) {
-            console.error("Error saving image:", err);
-            return;
-        }
-        const imageUrl = `/uploads/${path_1.default.basename(filePath)}`;
-        console.log(`Image saved and broadcasted: ${imageUrl}`);
-        let room = yield Models_1.ChatRoom.findOne({
-            where: {
-                name: data.room
-            }
-        });
+    try {
+        const mimeMap = {
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+            '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
+            '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.txt': 'text/plain', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        };
+        const mimetype = mimeMap[fileExt] || 'application/octet-stream';
+        const result = yield (0, supabaseStorage_1.uploadFileToSupabase)(supabase_1.BUCKET, Buffer.from(image), fileName, mimetype, supabase_1.FOLDERS.CHAT);
+        const imageUrl = result.url;
+        console.log(`File uploaded to Supabase and broadcasted: ${imageUrl}`);
+        let room = yield prisma_1.default.chatRoom.findFirst({ where: { name: data.room } });
         if (!room) {
             return;
         }
         let url = `${tag}${imageUrl}`;
-        const message = yield Models_1.Message.create({
-            text: (0, cryptography_1.encryptMessage)(url),
-            from: data.from,
-            timestamp: new Date(),
-            chatroomId: room === null || room === void 0 ? void 0 : room.id
+        const message = yield prisma_1.default.message.create({
+            data: {
+                text: (0, cryptography_1.encryptMessage)(url),
+                from: data.from,
+                timestamp: new Date(),
+                chatroomId: room.id
+            }
         });
-        io.to(room.name).emit(events_1.Emit.RECV_FILE, Object.assign(Object.assign({}, message.dataValues), { text: url }));
-    }));
+        // Send push notification to offline recipient
+        let to = room.members.split(",").filter((member) => member !== data.from)[0];
+        let otherUser = yield prisma_1.default.user.findUnique({
+            where: { id: to },
+            include: { onlineUser: true }
+        });
+        if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
+            let sender = yield prisma_1.default.user.findFirst({
+                where: { id: data.from },
+                include: { profile: true }
+            });
+            const fileLabel = tag === '<img>' ? 'an image' : 'a file';
+            const senderName = `${(_a = sender === null || sender === void 0 ? void 0 : sender.profile) === null || _a === void 0 ? void 0 : _a.firstName} ${(_b = sender === null || sender === void 0 ? void 0 : sender.profile) === null || _b === void 0 ? void 0 : _b.lastName}`;
+            yield notification_1.NotificationService.create({
+                userId: to,
+                type: enum_1.NotificationType.CHAT,
+                title: `${senderName} sent ${fileLabel}`,
+                message: `You received ${fileLabel} in chat`,
+                data: { type: 'chat', roomName: room.name, senderId: data.from, senderName },
+            });
+        }
+        io.to(room.name).emit(events_1.Emit.RECV_FILE, Object.assign(Object.assign({}, message), { text: url }));
+    }
+    catch (err) {
+        console.error("Error uploading chat file to Supabase:", err);
+    }
 });
 exports.uploadFile = uploadFile;

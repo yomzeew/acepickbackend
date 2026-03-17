@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { Education, Profile } from '../models/Models'
+import prisma from '../config/prisma';
 import { errorResponse, handleResponse, successResponse } from "../utils/modules";
 import { educationSchema, updateEducationSchema } from "../validation/body";
 
@@ -9,19 +9,15 @@ export const getEducation = async (req: Request, res: Response) => {
     console.log(req.user);
 
     try {
-        const profile = await Profile.findOne({
-            where: { userId: id }
-        })
+        const profile = await prisma.profile.findFirst({ where: { userId: id } });
 
         if (!profile) {
             return handleResponse(res, 404, false, 'Profile not found')
         }
 
-        const education = await Education.findAll({
-            where: {
-                profileId: profile.id
-            },
-            order: [['createdAt', 'DESC']]
+        const education = await prisma.education.findMany({
+            where: { profileId: profile.id },
+            orderBy: { createdAt: 'desc' }
         });
 
         if (!education) {
@@ -51,22 +47,22 @@ export const addEducation = async (req: Request, res: Response) => {
     const { school, degreeType, course, startDate, gradDate, isCurrent } = req.body;
 
     try {
-        const profile = await Profile.findOne({
-            where: { userId: id }
-        })
+        const profile = await prisma.profile.findFirst({ where: { userId: id } });
 
         if (!profile) {
             return handleResponse(res, 404, false, 'Profile not found')
         }
 
-        const education = await Education.create({
-            school,
-            degreeType,
-            course,
-            startDate,
-            gradDate,
-            isCurrent,
-            profileId: profile.id
+        const education = await prisma.education.create({
+            data: {
+                school,
+                degreeType,
+                course,
+                startDate,
+                gradDate,
+                isCurrent,
+                profileId: profile.id
+            }
         });
 
         return successResponse(res, 'success', education);
@@ -95,10 +91,9 @@ export const updateEducation = async (req: Request, res: Response) => {
         }
 
 
-        const updated = await Education.update(result.data, {
-            where: {
-                id: id,
-            }
+        const updated = await prisma.education.update({
+            where: { id: Number(id) },
+            data: result.data
         })
 
         return successResponse(res, 'success', updated);
@@ -117,10 +112,8 @@ export const deleteEducation = async (req: Request, res: Response) => {
 
     try {
 
-        const deleted = await Education.destroy({
-            where: {
-                id,
-            }
+        const deleted = await prisma.education.delete({
+            where: { id: Number(id) }
         })
 
         return successResponse(res, 'success', deleted);

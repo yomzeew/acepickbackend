@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { createSector, deleteSector, getSectors, getSectorsMetrics, updateSector } from "../controllers/sector";
 import { createProfession, deleteProfession, getProfessionById, getProfessions, updateProfession } from "../controllers/professions";
-import { getProfessionalById, getProfessionalByUserId, getProfessionals } from "../controllers/professionals";
+import { getProfessionalById, getProfessionalByUserId, getProfessionals, updateProfessionalProfile } from "../controllers/professionals";
 import { getCooperates } from "../controllers/cooperates";
-import { approveJob, cancelJob, completeJob, createJobOrder, disputeJob, generateInvoice, getJobById, getJobs, getLatestJob, respondToJob, updateInvoice, updateJob, viewInvoice } from "../controllers/Jobs";
+import { createSkill, deleteSkill, getSkillById, getSkills, getSkillCategories, getPopularSkills, updateSkill } from "../controllers/skills";
+import { addProfessionalSkills, getMySkills, getProfessionalSkills, removeProfessionalSkill, updateProfessionalSkill } from "../controllers/professionalSkills";
+import { approveJob, cancelJob, completeJob, createJobOrder, disputeJob, generateInvoice, getJobById, getJobs, getLatestJob, resolveDispute as resolveJobDispute, respondToJob, updateInvoice, updateJob, viewInvoice } from "../controllers/Jobs";
 import { UserRole } from "../utils/enum";
 import { allowRoles } from "../middlewares/allowRoles";
 import { findPersonsNearby, sendEmailTest, sendSMSTest, testGetProfessional, testNotification, testRedis } from "../controllers/test";
@@ -22,9 +24,11 @@ import { addProduct, deleteProduct, getProducts, getMyProducts, updateProduct, s
 import { addCategory, deleteCategory, getCategories, updateCategory } from "../controllers/category";
 import { uploads } from "../services/upload";
 import { uploadFiles } from "../controllers/upload";
-import { acceptOrder, cancelOrder, confirmDelivery, confirmPickup, createOrder, deliverOrder, disputeOrder, getNearestPaidOrders, getOrdersBuyer, getOrdersRider, getOrdersSeller, pickupOrder, resolveDispute, transportOrder } from "../controllers/order";
+import { acceptOrder, cancelOrder, confirmDelivery, confirmPickup, createOrder, deliverOrder, disputeOrder, enRouteToPickup, arrivedAtPickup, arrivedAtDropoff, expireStaleOrders, retryRiderSearch, getOrderById, getNearestPaidOrders, getOrdersBuyer, getOrdersRider, getOrdersSeller, pickupOrder, resolveDispute, transportOrder } from "../controllers/order";
 import { giveRating, isRated } from "../controllers/rating";
 import { deleteReview, editReview, giveReview } from "../controllers/review";
+import { getClientDashboard, getProfessionalDashboard, getDeliveryDashboard } from "../controllers/dashboard";
+import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications } from "../controllers/notifications";
 
 const routes = Router();
 
@@ -33,6 +37,22 @@ routes.get("/sectors/details", getSectorsMetrics);
 routes.post("/sectors", createSector);
 routes.put("/sectors/:id", updateSector);
 routes.delete("/sectors/:id", deleteSector);
+
+// Skills routes
+routes.get("/skills", getSkills);
+routes.get("/skills/popular", getPopularSkills);
+routes.get("/skills/categories", getSkillCategories);
+routes.get("/skills/:id", getSkillById);
+routes.post("/skills", createSkill);
+routes.put("/skills/:id", updateSkill);
+routes.delete("/skills/:id", deleteSkill);
+
+// Professional skills routes
+routes.get("/professionals/:professionalId/skills", getProfessionalSkills);
+routes.get("/my-skills", allowRoles(UserRole.PROFESSIONAL), getMySkills);
+routes.post("/professionals/skills", allowRoles(UserRole.PROFESSIONAL), addProfessionalSkills);
+routes.put("/professionals/skills/:skillId", allowRoles(UserRole.PROFESSIONAL), updateProfessionalSkill);
+routes.delete("/professionals/skills/:skillId", allowRoles(UserRole.PROFESSIONAL), removeProfessionalSkill);
 
 routes.get("/clients/:id", allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), getClient);
 
@@ -70,6 +90,7 @@ routes.delete("/professions/:id", deleteProfession);
 routes.get("/professionals", getProfessionals);
 routes.get("/professionals/:professionalId", getProfessionalById);
 routes.get('/professionals/user/:userId', getProfessionalByUserId); // Allow any role to get professional by userId
+routes.put('/professionals/profile', allowRoles(UserRole.PROFESSIONAL), updateProfessionalProfile);
 
 routes.get("/cooperates", getCooperates);
 
@@ -86,8 +107,9 @@ routes.get('/jobs/invoice/:jobId', allowRoles(UserRole.PROFESSIONAL, UserRole.CL
 routes.post('/jobs/complete/:jobId', allowRoles(UserRole.PROFESSIONAL), completeJob);
 routes.post('/jobs/approve/:jobId', allowRoles(UserRole.CLIENT), approveJob);
 routes.post('/jobs/dispute/:jobId', allowRoles(UserRole.CLIENT), disputeJob);
+routes.post('/jobs/dispute/resolve/:jobId', allowRoles(UserRole.ADMIN), resolveJobDispute);
 routes.post('/jobs/cancel/:jobId', allowRoles(UserRole.CLIENT), cancelJob);
-routes.put('jobs/update/:jobId', allowRoles(UserRole.CLIENT), updateJob);
+routes.put('/jobs/update/:jobId', allowRoles(UserRole.CLIENT), updateJob);
 
 routes.post('/notification-test', testNotification);
 routes.post('/send-sms', sendSMSTest);
@@ -154,13 +176,18 @@ routes.get('/paid-orders', allowRoles(UserRole.DELIVERY), getNearestPaidOrders);
 routes.get('/rider-orders', allowRoles(UserRole.DELIVERY), getOrdersRider);
 routes.get('/buyer-orders', allowRoles(UserRole.CLIENT), getOrdersBuyer);
 routes.get('/seller-orders', allowRoles(UserRole.CLIENT), getOrdersSeller);
+routes.get('/orders/:orderId', allowRoles('*'), getOrderById);
 routes.put('/orders/accept/:orderId', allowRoles(UserRole.DELIVERY), acceptOrder);
+routes.put('/orders/en_route_to_pickup/:orderId', allowRoles(UserRole.DELIVERY), enRouteToPickup);
+routes.put('/orders/arrived_at_pickup/:orderId', allowRoles(UserRole.DELIVERY), arrivedAtPickup);
 routes.put('/orders/pickup/:orderId', allowRoles(UserRole.DELIVERY), pickupOrder);
 routes.put('/orders/confirm_pickup/:orderId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), confirmPickup);
-// routes.put('/orders/transport/:orderId', allowRoles(UserRole.DELIVERY), transportOrder);
+routes.put('/orders/arrived_at_dropoff/:orderId', allowRoles(UserRole.DELIVERY), arrivedAtDropoff);
 routes.put('/orders/deliver/:orderId', allowRoles(UserRole.DELIVERY), deliverOrder);
 routes.put('/orders/confirm_delivery/:productTransactionId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), confirmDelivery);
 routes.put('/orders/cancel/:orderId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), cancelOrder);
+routes.post('/orders/retry/:orderId', allowRoles(UserRole.CLIENT), retryRiderSearch);
+routes.post('/orders/expire-stale', allowRoles(UserRole.ADMIN), expireStaleOrders);
 routes.post('/orders/dispute', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), disputeOrder);
 routes.post('/orders/dispute/resolve/:disputeId', resolveDispute);
 
@@ -170,5 +197,16 @@ routes.post('/reviews', giveReview);
 routes.put('/reviews/:reviewId', editReview);
 routes.delete('/reviews/:reviewId', deleteReview);
 
+routes.get('/dashboard/client', allowRoles(UserRole.CLIENT), getClientDashboard);
+routes.get('/dashboard/professional', allowRoles(UserRole.PROFESSIONAL), getProfessionalDashboard);
+routes.get('/dashboard/delivery', allowRoles(UserRole.DELIVERY), getDeliveryDashboard);
+
+// Notification routes
+routes.get('/notifications', getNotifications);
+routes.get('/notifications/unread-count', getUnreadCount);
+routes.put('/notifications/read-all', markAllAsRead);
+routes.put('/notifications/:notificationId/read', markAsRead);
+routes.delete('/notifications/:notificationId', deleteNotification);
+routes.delete('/notifications', deleteAllNotifications);
 
 export default routes;

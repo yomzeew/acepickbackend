@@ -8,47 +8,44 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CommissionService = void 0;
-const sequelize_1 = require("sequelize");
-const Commison_1 = require("../models/Commison");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const enum_1 = require("../utils/enum");
 class CommissionService {
     static calculateCommission(amount, type) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const commission = yield Commison_1.Commission.findOne({
+                const now = new Date();
+                const commission = yield prisma_1.default.commission.findFirst({
                     where: {
                         active: true,
-                        type: {
-                            [sequelize_1.Op.in]: ['all', type],
-                        },
-                        [sequelize_1.Op.and]: [
+                        type: { in: ['all', type] },
+                        OR: [
+                            { effectiveFrom: { lte: now } },
+                            { effectiveFrom: null },
+                        ],
+                        AND: [
                             {
-                                [sequelize_1.Op.or]: [
-                                    { effectiveFrom: { [sequelize_1.Op.lte]: new Date() } },
-                                    { effectiveFrom: null },
-                                ],
-                            },
-                            {
-                                [sequelize_1.Op.or]: [
-                                    { effectiveTo: { [sequelize_1.Op.gte]: new Date() } },
+                                OR: [
+                                    { effectiveTo: { gte: now } },
                                     { effectiveTo: null },
                                 ],
                             },
                         ],
-                        minAmount: {
-                            [sequelize_1.Op.lte]: amount,
-                        },
+                        minAmount: { lte: amount },
                     }
                 });
                 if (!commission) {
                     return 0;
                 }
                 if (commission.type === enum_1.CommissionType.PERCENTAGE) {
-                    return amount * commission.rate;
+                    return amount * Number(commission.rate);
                 }
-                return commission.fixedAmount;
+                return Number(commission.fixedAmount);
             }
             catch (error) {
                 console.log(error);

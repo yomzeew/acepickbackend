@@ -8,21 +8,24 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteExperience = exports.updateExperience = exports.addExperience = exports.getExperiences = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
 const body_1 = require("../validation/body");
 const getExperiences = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.user;
     try {
-        const profile = yield Models_1.Profile.findOne({ where: { userId: id } });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const experiences = yield Models_1.Experience.findAll({
+        const experiences = yield prisma_1.default.experience.findMany({
             where: { profileId: profile.id },
-            order: [['createdAt', 'DESC']],
+            orderBy: { createdAt: 'desc' }
         });
         return (0, modules_1.successResponse)(res, 'success', experiences);
     }
@@ -43,18 +46,20 @@ const addExperience = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
     const { postHeld, workPlace, startDate, endDate, isCurrent, description } = result.data;
     try {
-        const profile = yield Models_1.Profile.findOne({ where: { userId: id } });
+        const profile = yield prisma_1.default.profile.findFirst({ where: { userId: id } });
         if (!profile) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Profile not found');
         }
-        const experience = yield Models_1.Experience.create({
-            postHeld,
-            workPlace,
-            startDate,
-            endDate,
-            isCurrent,
-            description,
-            profileId: profile.id
+        const experience = yield prisma_1.default.experience.create({
+            data: {
+                postHeld,
+                workPlace,
+                startDate,
+                endDate,
+                isCurrent,
+                description,
+                profileId: profile.id
+            }
         });
         return (0, modules_1.successResponse)(res, 'success', experience);
     }
@@ -65,7 +70,6 @@ const addExperience = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.addExperience = addExperience;
 const updateExperience = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
-    //const { userId } = req.user;
     if (!id) {
         return (0, modules_1.handleResponse)(res, 400, false, 'Provide an id');
     }
@@ -78,8 +82,9 @@ const updateExperience = (req, res) => __awaiter(void 0, void 0, void 0, functio
         });
     }
     try {
-        const updated = yield Models_1.Experience.update(result.data, {
-            where: { id }
+        const updated = yield prisma_1.default.experience.update({
+            where: { id: Number(id) },
+            data: result.data
         });
         return (0, modules_1.successResponse)(res, 'success', updated);
     }
@@ -94,8 +99,8 @@ const deleteExperience = (req, res) => __awaiter(void 0, void 0, void 0, functio
         return (0, modules_1.handleResponse)(res, 400, false, 'Provide an id');
     }
     try {
-        yield Models_1.Experience.destroy({
-            where: { id }
+        yield prisma_1.default.experience.delete({
+            where: { id: Number(id) }
         });
         return (0, modules_1.successResponse)(res, 'success', { message: 'Experience deleted successfully' });
     }

@@ -8,11 +8,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.emailUser = exports.toggleSuspension = exports.getAllUsers = void 0;
-const User_1 = require("../../models/User");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const enum_1 = require("../../utils/enum");
-const Profile_1 = require("../../models/Profile");
 const modules_1 = require("../../utils/modules");
 const messages_1 = require("../../utils/messages");
 const gmail_1 = require("../../services/gmail");
@@ -29,21 +31,15 @@ const getAllUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             details: result.error.flatten().fieldErrors,
         });
     }
-    // const modifiedRole = role.slice(0, -1);
     try {
-        const clients = yield User_1.User.findAll({
-            where: {
-                role: role,
-            },
-            attributes: { exclude: ['password'] },
-            include: [
-                {
-                    model: Profile_1.Profile,
-                }
-            ],
-            order: [['createdAt', 'DESC']]
+        const clients = yield prisma_1.default.user.findMany({
+            where: { role: role },
+            include: { profile: true },
+            orderBy: { createdAt: 'desc' }
         });
-        return (0, modules_1.successResponse)(res, 'success', clients);
+        // Exclude password from results
+        const sanitized = clients.map((u) => { u.password = null; return u; });
+        return (0, modules_1.successResponse)(res, 'success', sanitized);
     }
     catch (error) {
         console.log(error);
@@ -52,26 +48,24 @@ const getAllUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 });
 exports.getAllUsers = getAllUsers;
 const toggleSuspension = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     const { id } = req.user;
     const { userId } = req.params;
     try {
-        const user = yield User_1.User.findByPk(userId, { include: [Profile_1.Profile] });
+        const user = yield prisma_1.default.user.findUnique({ where: { id: userId }, include: { profile: true } });
         if (!user) {
             return (0, modules_1.handleResponse)(res, 404, false, 'User not found');
         }
         if (user.status === enum_1.UserStatus.ACTIVE) {
-            user.status = enum_1.UserStatus.SUSPENDED;
-            yield user.save();
-            //send email to user
+            yield prisma_1.default.user.update({ where: { id: userId }, data: { status: enum_1.UserStatus.SUSPENDED } });
             const email = (0, messages_1.suspendUserEmail)(user);
-            const response = yield (0, gmail_1.sendEmail)(user.email, email.title, email.body, user.profile.firstName);
+            yield (0, gmail_1.sendEmail)(user.email, email.title, email.body, ((_a = user.profile) === null || _a === void 0 ? void 0 : _a.firstName) || 'User');
             return (0, modules_1.successResponse)(res, 'success', 'User suspended successfully');
         }
         else {
-            user.status = enum_1.UserStatus.ACTIVE;
-            yield user.save();
+            yield prisma_1.default.user.update({ where: { id: userId }, data: { status: enum_1.UserStatus.ACTIVE } });
             const email = (0, messages_1.reactivateUserEmail)(user);
-            const response = yield (0, gmail_1.sendEmail)(user.email, email.title, email.body, user.profile.firstName);
+            yield (0, gmail_1.sendEmail)(user.email, email.title, email.body, ((_b = user.profile) === null || _b === void 0 ? void 0 : _b.firstName) || 'User');
             return (0, modules_1.successResponse)(res, 'success', 'User reactivated successfully');
         }
     }
@@ -82,13 +76,14 @@ const toggleSuspension = (req, res) => __awaiter(void 0, void 0, void 0, functio
 });
 exports.toggleSuspension = toggleSuspension;
 const emailUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     const { userId, title, body } = req.body;
     try {
-        const user = yield User_1.User.findByPk(userId, { include: [Profile_1.Profile] });
+        const user = yield prisma_1.default.user.findUnique({ where: { id: userId }, include: { profile: true } });
         if (!user) {
             return (0, modules_1.handleResponse)(res, 404, false, 'User not found');
         }
-        const { success, error } = yield (0, gmail_1.sendEmail)(user.email, title, body, user.profile.firstName);
+        const { success, error } = yield (0, gmail_1.sendEmail)(user.email, title, body, ((_a = user.profile) === null || _a === void 0 ? void 0 : _a.firstName) || 'User');
         if (success) {
             return (0, modules_1.handleResponse)(res, 200, true, 'Email sent successfully');
         }

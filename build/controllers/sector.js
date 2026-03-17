@@ -8,14 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteSector = exports.updateSector = exports.createSector = exports.getSectorsMetrics = exports.getSectors = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
 const getSectors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const sectors = yield Models_1.Sector.findAll({
-            order: [['title', 'ASC']],
+        const sectors = yield prisma_1.default.sector.findMany({
+            orderBy: { title: 'asc' },
         });
         return (0, modules_1.successResponse)(res, 'success', sectors);
     }
@@ -27,56 +30,32 @@ exports.getSectors = getSectors;
 const getSectorsMetrics = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     let { id } = req.params;
     try {
-        let sectors = yield Models_1.Sector.findAll();
-        for (const sector of sectors) {
-            const numOfProf = yield Models_1.Professional.count({
-                include: [
-                    {
-                        model: Models_1.Profession,
-                        as: "profession",
-                        where: {
-                            sectorId: sector.id,
+        let sectors = yield prisma_1.default.sector.findMany();
+        const results = yield Promise.all(sectors.map((sector) => __awaiter(void 0, void 0, void 0, function* () {
+            const numOfProf = yield prisma_1.default.professional.count({
+                where: {
+                    profession: {
+                        sectorId: sector.id,
+                    },
+                },
+            });
+            const numOfJobs = yield prisma_1.default.job.count({
+                where: {
+                    professional: {
+                        profile: {
+                            professional: {
+                                profession: {
+                                    sectorId: sector.id,
+                                },
+                            },
                         },
                     },
-                ],
+                },
             });
-            const numOfJobs = yield Models_1.Job.count({
-                include: [
-                    {
-                        model: Models_1.User,
-                        as: "professional",
-                        required: true,
-                        include: [
-                            {
-                                model: Models_1.Profile,
-                                as: "profile",
-                                required: true,
-                                include: [
-                                    {
-                                        model: Models_1.Professional,
-                                        as: "professional",
-                                        required: true,
-                                        include: [
-                                            {
-                                                model: Models_1.Profession,
-                                                as: "profession",
-                                                required: true,
-                                                where: {
-                                                    sectorId: sector.id,
-                                                },
-                                            },
-                                        ],
-                                    },
-                                ],
-                            },
-                        ],
-                    },
-                ],
-            });
-            sector.setDataValue('numOfProf', numOfProf);
-            sector.setDataValue('numOfJobs', numOfJobs);
-        }
-        return (0, modules_1.successResponse)(res, "success", sectors);
+            return Object.assign(Object.assign({}, sector), { numOfProf,
+                numOfJobs });
+        })));
+        return (0, modules_1.successResponse)(res, "success", results);
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, "error", error);
@@ -89,7 +68,7 @@ const createSector = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         return (0, modules_1.handleResponse)(res, 400, false, 'Please provide all fields');
     }
     try {
-        const sector = yield Models_1.Sector.create({ title, image });
+        const sector = yield prisma_1.default.sector.create({ data: { title, image } });
         return (0, modules_1.successResponse)(res, 'success', sector);
     }
     catch (error) {
@@ -103,7 +82,10 @@ const updateSector = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         return (0, modules_1.handleResponse)(res, 400, false, "Please provide at least one field to update");
     }
     try {
-        let sector = yield Models_1.Sector.update(req.body, { where: { id: id } });
+        let sector = yield prisma_1.default.sector.update({
+            where: { id: Number(id) },
+            data: req.body
+        });
         return (0, modules_1.successResponse)(res, "success", sector);
     }
     catch (error) {
@@ -114,8 +96,8 @@ exports.updateSector = updateSector;
 const deleteSector = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     let { id } = req.params;
     try {
-        let sector = yield Models_1.Sector.destroy({ where: { id: id } });
-        return (0, modules_1.successResponse)(res, "success", sector);
+        yield prisma_1.default.sector.delete({ where: { id: Number(id) } });
+        return (0, modules_1.successResponse)(res, "success", {});
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, "error", error);

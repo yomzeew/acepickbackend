@@ -188,8 +188,18 @@ exports.jobPostSchema = zod_1.z.object({
     description: zod_1.z.string().min(1, "Description is required"),
     address: zod_1.z.string().min(1, "Address is required"),
     numOfJobs: zod_1.z.number().int().positive("Number of jobs must be a positive integer").optional(),
-    professionalId: zod_1.z.string().uuid("Professional ID must be a valid UUID"),
+    professionalId: zod_1.z.union([zod_1.z.string().uuid("Professional ID must be a valid UUID"), zod_1.z.string().min(1)]),
     mode: zod_1.z.nativeEnum(enum_1.JobMode).optional(),
+    // Additional optional fields from frontend
+    categoryId: zod_1.z.string().optional(),
+    startDate: zod_1.z.string().datetime().optional(),
+    deadline: zod_1.z.string().datetime().optional(),
+    budgetMin: zod_1.z.number().positive("Minimum budget must be positive").optional(),
+    budgetMax: zod_1.z.number().positive("Maximum budget must be positive").optional(),
+    priority: zod_1.z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
+    state: zod_1.z.string().optional(),
+    lga: zod_1.z.string().optional(),
+    skillsRequired: zod_1.z.array(zod_1.z.string()).optional(),
 });
 exports.jobUpdateSchema = zod_1.z.object({
     jobId: zod_1.z.number().int().positive("Job ID must be a positive integer").optional(),
@@ -362,12 +372,14 @@ exports.updateEducationSchema = zod_1.z.object({
         invalid_type_error: 'Start date must be a valid date'
     }).optional(),
     gradDate: zod_1.z
+        .coerce
         .date({ invalid_type_error: 'Graduation date must be a valid date' })
-        .optional(),
+        .optional()
+        .nullable(),
     isCurrent: zod_1.z.boolean().optional(),
 }).refine((data) => {
-    // If gradDate is provided, isCurrent must not be true
-    if (data.gradDate !== undefined) {
+    // If gradDate is provided (not null/undefined), isCurrent must not be true
+    if (data.gradDate) {
         return data.isCurrent !== true;
     }
     return true;
@@ -525,7 +537,8 @@ exports.createProductSchema = zod_1.z.object({
         .optional(),
     images: zod_1.z
         .array(zod_1.z.string().min(1, 'Image path cannot be empty'))
-        .min(1, 'At least one image is required'),
+        .optional()
+        .default([]),
     categoryId: zod_1.z
         .number({
         required_error: 'Category ID is required',
@@ -549,14 +562,18 @@ exports.createProductSchema = zod_1.z.object({
         .min(0, 'Discount cannot be negative')
         .max(100, 'Discount cannot be more than 100%')
         .optional(),
-    userId: zod_1.z
-        .string()
-        .uuid('User ID must be a valid UUID'),
+    weightPerUnit: zod_1.z
+        .number()
+        .positive('Weight must be positive')
+        .optional(),
     locationId: zod_1.z
         .number({
-        required_error: 'Location ID is required',
         invalid_type_error: 'Location ID must be a number',
-    }),
+    })
+        .optional(),
+    state: zod_1.z.string().optional(),
+    lga: zod_1.z.string().optional(),
+    address: zod_1.z.string().optional(),
 });
 exports.updateProductSchema = zod_1.z.object({
     name: zod_1.z.

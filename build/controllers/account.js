@@ -13,7 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAccount = exports.updateAccount = exports.resolveAccount = exports.getAccounts = exports.addAccount = exports.getBanks = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const configSetup_1 = __importDefault(require("../config/configSetup"));
 const axios_1 = __importDefault(require("axios"));
 const modules_1 = require("../utils/modules");
@@ -39,7 +39,7 @@ const addAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         return res.status(400).json({ errors: result.error.format() });
     }
     const { accountName, bank, bankCode, accountNumber } = result.data;
-    const existingAccount = yield Models_1.Account.findOne({ where: { number: accountNumber } });
+    const existingAccount = yield prisma_1.default.account.findFirst({ where: { number: accountNumber } });
     if (existingAccount) {
         return (0, modules_1.handleResponse)(res, 400, false, 'Account already exists');
     }
@@ -56,13 +56,15 @@ const addAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         },
     });
     const { data } = response.data;
-    const account = yield Models_1.Account.create({
-        userId: id,
-        name: accountName,
-        bank: bank,
-        number: accountNumber,
-        recipientCode: data.recipient_code,
-        currency: data.currency,
+    const account = yield prisma_1.default.account.create({
+        data: {
+            userId: id,
+            name: accountName,
+            bank: bank,
+            number: accountNumber,
+            recipientCode: data.recipient_code,
+            currency: data.currency,
+        }
     });
     return (0, modules_1.successResponse)(res, 'success', account);
 });
@@ -70,9 +72,9 @@ exports.addAccount = addAccount;
 const getAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.user;
-        const accounts = yield Models_1.Account.findAll({
+        const accounts = yield prisma_1.default.account.findMany({
             where: { userId: id },
-            order: [['createdAt', 'DESC']]
+            orderBy: { createdAt: 'desc' }
         });
         return (0, modules_1.successResponse)(res, 'success', accounts);
     }
@@ -104,7 +106,7 @@ const updateAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     const recipientCode = req.params.recipientCode;
     const { name } = req.body;
     try {
-        const account = yield Models_1.Account.findOne({ where: { recipientCode } });
+        const account = yield prisma_1.default.account.findFirst({ where: { recipientCode } });
         if (!account) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Account not found');
         }
@@ -115,9 +117,11 @@ const updateAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
         });
         if (response.data.status) {
-            account.name = name;
-            yield account.save();
-            return (0, modules_1.successResponse)(res, 'success', account);
+            const updated = yield prisma_1.default.account.update({
+                where: { id: account.id },
+                data: { name }
+            });
+            return (0, modules_1.successResponse)(res, 'success', updated);
         }
     }
     catch (error) {
@@ -128,7 +132,7 @@ exports.updateAccount = updateAccount;
 const deleteAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.user;
     const { recipientCode } = req.params;
-    const account = yield Models_1.Account.findOne({ where: { userId: id, recipientCode } });
+    const account = yield prisma_1.default.account.findFirst({ where: { userId: id, recipientCode } });
     try {
         if (!account) {
             return (0, modules_1.handleResponse)(res, 404, false, 'Account not found');
@@ -139,7 +143,7 @@ const deleteAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
         });
         if (response.data.status) {
-            yield account.destroy();
+            yield prisma_1.default.account.delete({ where: { id: account.id } });
             return (0, modules_1.successResponse)(res, 'success', response.data);
         }
     }

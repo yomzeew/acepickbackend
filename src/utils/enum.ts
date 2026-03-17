@@ -50,6 +50,12 @@ export enum PayStatus {
     RELEASED = 'released',
 }
 
+export enum ActivityStatus {
+    ACT_SUCCESS = 'act_success',
+    ACT_FAILED = 'act_failed',
+    ACT_PENDING = 'act_pending'
+}
+
 export enum JobStatus {
     COMPLETED = 'COMPLETED',
     APPROVED = 'APPROVED',
@@ -112,13 +118,18 @@ export enum OrderStatus {
     PENDING = 'pending',
     PAID = 'paid',
     ACCEPTED = 'accepted',
+    EN_ROUTE_TO_PICKUP = 'en_route_to_pickup',
+    ARRIVED_AT_PICKUP = 'arrived_at_pickup',
     PICKED_UP = 'picked_up',
     CONFIRM_PICKUP = 'confirm_pickup',
     IN_TRANSIT = 'in_transit',
+    ARRIVED_AT_DROPOFF = 'arrived_at_dropoff',
     DELIVERED = 'delivered',
     CONFIRM_DELIVERY = 'confirm_delivery',
     CANCELLED = 'cancelled',
-    DISPUTED = 'disputed'
+    DISPUTED = 'disputed',
+    EXPIRED = 'expired',
+    NOT_REQUIRED = 'not_required',
 }
 
 export enum TransactionDescription {
@@ -167,4 +178,13 @@ export enum EntryCategory {
     JOB = 'job',
     PRODUCT = 'product',
     DELIVERY = 'delivery',
+}
+
+export enum NotificationType {
+    JOB = 'job',
+    ORDER = 'order',
+    PAYMENT = 'payment',
+    CHAT = 'chat',
+    SYSTEM = 'system',
+    PROFILE = 'profile',
 }

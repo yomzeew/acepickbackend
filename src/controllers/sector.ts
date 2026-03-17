@@ -1,12 +1,12 @@
 import { Request, Response } from "express";
-import { Professional, Profession, Sector, User, Profile, Job } from '../models/Models'
+import prisma from '../config/prisma';
 import { successResponse, errorResponse, handleResponse } from "../utils/modules";
 
 export const getSectors = async (req: Request, res: Response) => {
   try {
 
-    const sectors = await Sector.findAll({
-      order: [['title', 'ASC']],
+    const sectors = await prisma.sector.findMany({
+      orderBy: { title: 'asc' },
     });
 
     return successResponse(res, 'success', sectors)
@@ -20,63 +20,39 @@ export const getSectorsMetrics = async (req: Request, res: Response) => {
   let { id } = req.params
 
   try {
-    let sectors = await Sector.findAll()
+    let sectors = await prisma.sector.findMany()
 
-    for (const sector of sectors) {
-      const numOfProf = await Professional.count({
-        include: [
-          {
-            model: Profession,
-            as: "profession",
-            where: {
-              sectorId: sector.id,
+    const results = await Promise.all(sectors.map(async (sector: any) => {
+      const numOfProf = await prisma.professional.count({
+        where: {
+          profession: {
+            sectorId: sector.id,
+          },
+        },
+      });
+
+      const numOfJobs = await prisma.job.count({
+        where: {
+          professional: {
+            profile: {
+              professional: {
+                profession: {
+                  sectorId: sector.id,
+                },
+              },
             },
           },
-        ],
+        },
       });
 
+      return {
+        ...sector,
+        numOfProf,
+        numOfJobs,
+      };
+    }));
 
-      const numOfJobs = await Job.count({
-        include: [
-          {
-            model: User,
-            as: "professional",
-            required: true,
-            include: [
-              {
-                model: Profile,
-                as: "profile",
-                required: true,
-                include: [
-                  {
-                    model: Professional,
-                    as: "professional",
-                    required: true,
-                    include: [
-                      {
-                        model: Profession,
-                        as: "profession",
-                        required: true,
-                        where: {
-                          sectorId: sector.id,
-                        },
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      });
-
-
-      sector.setDataValue('numOfProf', numOfProf);
-
-      sector.setDataValue('numOfJobs', numOfJobs);
-    }
-
-    return successResponse(res, "success", sectors)
+    return successResponse(res, "success", results)
   } catch (error) {
     return errorResponse(res, "error", error)
   }
@@ -91,7 +67,7 @@ export const createSector = async (req: Request, res: Response) => {
   }
 
   try {
-    const sector = await Sector.create({ title, image })
+    const sector = await prisma.sector.create({ data: { title, image } })
 
     return successResponse(res, 'success', sector)
   } catch (error) {
@@ -108,7 +84,10 @@ export const updateSector = async (req: Request, res: Response) => {
   }
 
   try {
-    let sector = await Sector.update(req.body, { where: { id: id } })
+    let sector = await prisma.sector.update({
+      where: { id: Number(id) },
+      data: req.body
+    })
 
     return successResponse(res, "success", sector)
   } catch (error) {
@@ -121,9 +100,9 @@ export const deleteSector = async (req: Request, res: Response) => {
   let { id } = req.params
 
   try {
-    let sector = await Sector.destroy({ where: { id: id } })
+    await prisma.sector.delete({ where: { id: Number(id) } })
 
-    return successResponse(res, "success", sector)
+    return successResponse(res, "success", {})
   } catch (error) {
     return errorResponse(res, "error", error)
   }

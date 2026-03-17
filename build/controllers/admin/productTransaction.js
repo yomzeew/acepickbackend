@@ -8,13 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProductTransactions = void 0;
-const Models_1 = require("../../models/Models");
+const prisma_1 = __importDefault(require("../../config/prisma"));
 const modules_1 = require("../../utils/modules");
 const getProductTransactions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const productTransactions = yield Models_1.ProductTransaction.findAll({});
+        const productTransactions = yield prisma_1.default.productTransaction.findMany();
+        return (0, modules_1.successResponse)(res, 'success', productTransactions);
     }
     catch (error) {
         console.log(error);

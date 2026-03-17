@@ -8,14 +8,52 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProductTransactionById = exports.deleteProduct = exports.updateProduct = exports.addProduct = exports.selectProduct = exports.restockProduct = exports.soldProducts = exports.boughtProducts = exports.getMyProducts = exports.getProduct = exports.getProducts = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
+const library_1 = require("@prisma/client/runtime/library");
 const modules_1 = require("../utils/modules");
-const sequelize_1 = require("sequelize");
 const query_1 = require("../validation/query");
 const body_1 = require("../validation/body");
-const ProductTransaction_1 = require("../models/ProductTransaction");
+const userProfileSelect = {
+    id: true,
+    email: true,
+    phone: true,
+    status: true,
+    role: true,
+    agreed: true,
+    createdAt: true,
+    updatedAt: true,
+    profile: {
+        select: { id: true, avatar: true, firstName: true, lastName: true }
+    }
+};
+const parseImages = (product) => {
+    if (!product)
+        return product;
+    // Handle images field safely
+    let images = [];
+    if (product.images) {
+        if (Array.isArray(product.images)) {
+            images = product.images;
+        }
+        else if (typeof product.images === 'string') {
+            // Try to parse as JSON, if fails, treat as single URL
+            try {
+                const parsed = JSON.parse(product.images);
+                images = Array.isArray(parsed) ? parsed : [parsed];
+            }
+            catch (_a) {
+                // It's not JSON, treat as single URL string
+                images = [product.images];
+            }
+        }
+    }
+    return Object.assign(Object.assign({}, product), { images });
+};
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const result = query_1.getProductSchema.safeParse(req.query);
     if (!result.success) {
@@ -25,32 +63,28 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             errors: result.error.flatten().fieldErrors,
         });
     }
-    const { categoryId, category, search, state, lga, locationId, page, limit, orderBy, orderDir } = result.data;
+    const { categoryId, category, search, state, lga, locationId, page, limit, orderBy, orderDir, minPrice, maxPrice } = result.data;
     try {
-        const products = yield Models_1.Product.findAll({
-            where: Object.assign(Object.assign(Object.assign({ approved: true }, (categoryId && { categoryId })), (search && { name: { [sequelize_1.Op.like]: `%${search}%` } })), (locationId && { locationId })),
-            limit: limit,
-            offset: (page - 1) * limit,
-            include: [
-                {
-                    model: Models_1.Category,
-                    attributes: ['id', 'name', 'description'],
-                    where: Object.assign({}, (category && { name: { [sequelize_1.Op.like]: `%${category}%` } }))
-                },
-                {
-                    model: Models_1.Location,
-                    where: Object.assign(Object.assign({}, (state && { state: { [sequelize_1.Op.like]: `%${state}%` } })), (lga && { lga: { [sequelize_1.Op.like]: `%${lga}%` } }))
-                    //attributes: ['id', 'name', 'description'],
-                },
-            ],
-            order: [[orderBy || 'createdAt', orderDir || 'DESC']]
+        const products = yield prisma_1.default.product.findMany({
+            where: Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign({ approved: true }, (categoryId && { categoryId: Number(categoryId) })), (search && { name: { contains: search, mode: 'insensitive' } })), (locationId && { locationId: Number(locationId) })), (category && {
+                category: { name: { contains: category, mode: 'insensitive' } }
+            })), ((minPrice !== undefined || maxPrice !== undefined) && {
+                price: Object.assign(Object.assign({}, (minPrice !== undefined && { gte: minPrice })), (maxPrice !== undefined && { lte: maxPrice }))
+            })), (state || lga ? {
+                pickupLocation: Object.assign(Object.assign({}, (state && { state: { contains: state, mode: 'insensitive' } })), (lga && { lga: { contains: lga, mode: 'insensitive' } }))
+            } : undefined)),
+            take: limit,
+            skip: (page - 1) * limit,
+            include: {
+                category: { select: { id: true, name: true, description: true } },
+                pickupLocation: true,
+            },
+            orderBy: { [orderBy || 'createdAt']: (orderDir || 'desc').toLowerCase() },
         });
-        return (0, modules_1.successResponse)(res, 'success', products.map(product => {
-            const plainProduct = product.toJSON(); // or product.get({ plain: true });
-            return Object.assign(Object.assign({}, plainProduct), { images: JSON.parse(plainProduct.images || '[]') });
-        }));
+        return (0, modules_1.successResponse)(res, 'success', products.map(parseImages));
     }
     catch (error) {
+        console.error('Error in getProducts:', error);
         return (0, modules_1.errorResponse)(res, 'error', 'Failed to retrieve products');
     }
 });
@@ -58,21 +92,20 @@ exports.getProducts = getProducts;
 const getProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
-        const product = yield Models_1.Product.findByPk(id, {
-            include: [{
-                    model: Models_1.Category,
-                }, {
-                    model: Models_1.Location,
-                }, {
-                    model: Models_1.User,
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [{
-                            model: Models_1.Profile
-                        }]
-                }]
+        const product = yield prisma_1.default.product.findUnique({
+            where: { id: Number(id) },
+            include: {
+                category: true,
+                pickupLocation: true,
+                user: {
+                    select: userProfileSelect
+                }
+            }
         });
-        const productObj = product === null || product === void 0 ? void 0 : product.toJSON();
-        return (0, modules_1.successResponse)(res, 'success', Object.assign(Object.assign({}, productObj), { images: JSON.parse(productObj.images || '[]') }));
+        if (!product) {
+            return (0, modules_1.errorResponse)(res, 'error', 'Product not found');
+        }
+        return (0, modules_1.successResponse)(res, 'success', parseImages(product));
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, 'error', 'Failed to retrieve product');
@@ -83,28 +116,18 @@ const getMyProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     const { id, role } = req.user;
     console.log("id", id);
     try {
-        const products = yield Models_1.Product.findAll({
-            where: {
-                userId: id
+        const products = yield prisma_1.default.product.findMany({
+            where: { userId: id },
+            include: {
+                category: { select: { id: true, name: true, description: true } },
+                pickupLocation: true,
             },
-            include: [
-                {
-                    model: Models_1.Category,
-                    attributes: ['id', 'name', 'description'],
-                },
-                {
-                    model: Models_1.Location,
-                    //attributes: ['id', 'name', 'description'],
-                },
-            ],
-            order: [['createdAt', 'DESC']]
+            orderBy: { createdAt: 'desc' }
         });
-        return (0, modules_1.successResponse)(res, 'success', products.map(product => {
-            const plainProduct = product.toJSON(); // or product.get({ plain: true });
-            return Object.assign(Object.assign({}, plainProduct), { images: JSON.parse(plainProduct.images || '[]') });
-        }));
+        return (0, modules_1.successResponse)(res, 'success', products.map(parseImages));
     }
     catch (error) {
+        console.error('Error in getProducts:', error);
         return (0, modules_1.errorResponse)(res, 'error', 'Failed to retrieve products');
     }
 });
@@ -117,36 +140,24 @@ const boughtProducts = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ error: result.error.format() });
         }
         const { status } = result.data;
-        const productsTrans = yield ProductTransaction_1.ProductTransaction.findAll({
-            where: Object.assign({ buyerId: id }, ((status && status !== 'all') ? { status } : {})),
-            include: [{
-                    model: Models_1.Product,
-                }, {
-                    model: Models_1.Order,
-                    as: 'order',
-                    include: [{
-                            model: Models_1.User,
-                            attributes: ['id', 'email'],
-                            include: [{
-                                    model: Models_1.Profile,
-                                    attributes: ['id', 'avatar', 'firstName', 'lastName']
-                                }]
-                        }]
-                }, {
-                    model: Models_1.User,
-                    as: 'seller',
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [{
-                            model: Models_1.Profile,
-                            attributes: ['id', 'avatar', 'firstName', 'lastName']
-                        }]
-                }],
-            order: [['updatedAt', 'DESC']]
+        const productsTrans = yield prisma_1.default.productTransaction.findMany({
+            where: Object.assign({ buyerId: id }, ((status && status !== 'all') ? { status: status } : {})),
+            include: {
+                product: true,
+                order: {
+                    include: {
+                        rider: {
+                            select: userProfileSelect
+                        },
+                    }
+                },
+                seller: {
+                    select: userProfileSelect
+                },
+            },
+            orderBy: { updatedAt: 'desc' }
         });
-        return (0, modules_1.successResponse)(res, 'success', productsTrans.map((bought) => {
-            const boughtObj = bought.toJSON();
-            return Object.assign(Object.assign({}, boughtObj), { product: Object.assign(Object.assign({}, boughtObj.product), { images: JSON.parse(boughtObj.product.images) }) });
-        }));
+        return (0, modules_1.successResponse)(res, 'success', productsTrans.map((bought) => (Object.assign(Object.assign({}, bought), { product: parseImages(bought.product) }))));
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, 'error', 'Failed to retrieve product transactions');
@@ -161,44 +172,24 @@ const soldProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             return res.status(400).json({ error: result.error.format() });
         }
         const { status } = result.data;
-        const productsTrans = yield ProductTransaction_1.ProductTransaction.findAll({
-            where: Object.assign({ sellerId: id }, ((status && status !== 'all') ? { status } : {})),
-            include: [{
-                    model: Models_1.Product,
-                }, {
-                    model: Models_1.Order,
-                    as: 'order',
-                    include: [{
-                            model: Models_1.User,
-                            attributes: ['id', 'email'],
-                            include: [{
-                                    model: Models_1.Profile,
-                                    attributes: ['id', 'avatar', 'firstName', 'lastName']
-                                }]
-                        }]
-                }, {
-                    model: Models_1.User,
-                    as: 'buyer',
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [{
-                            model: Models_1.Profile,
-                            attributes: ['id', 'avatar', 'firstName', 'lastName']
-                        }]
-                }, {
-                    model: Models_1.User,
-                    as: 'buyer',
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [{
-                            model: Models_1.Profile,
-                            attributes: ['id', 'avatar', 'firstName', 'lastName']
-                        }]
-                }],
-            order: [['updatedAt', 'DESC']]
+        const productsTrans = yield prisma_1.default.productTransaction.findMany({
+            where: Object.assign({ sellerId: id }, ((status && status !== 'all') ? { status: status } : {})),
+            include: {
+                product: true,
+                order: {
+                    include: {
+                        rider: {
+                            select: userProfileSelect
+                        },
+                    }
+                },
+                buyer: {
+                    select: userProfileSelect
+                },
+            },
+            orderBy: { updatedAt: 'desc' }
         });
-        return (0, modules_1.successResponse)(res, 'success', productsTrans.map((sold) => {
-            const soldObj = sold.toJSON();
-            return Object.assign(Object.assign({}, soldObj), { product: Object.assign(Object.assign({}, soldObj.product), { images: JSON.parse(soldObj.product.images) }) });
-        }));
+        return (0, modules_1.successResponse)(res, 'success', productsTrans.map((sold) => (Object.assign(Object.assign({}, sold), { product: parseImages(sold.product) }))));
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, 'error', 'Failed to retrieve product transactions');
@@ -212,13 +203,15 @@ const restockProduct = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ error: result.error.format() });
         }
         const { productId, quantity } = result.data;
-        const product = yield Models_1.Product.findByPk(productId);
+        const product = yield prisma_1.default.product.findUnique({ where: { id: productId } });
         if (!product) {
             return res.status(404).json({ error: 'Product not found' });
         }
-        product.quantity += quantity;
-        yield product.save();
-        return (0, modules_1.successResponse)(res, 'success', Object.assign(Object.assign({}, product.toJSON()), { images: JSON.parse(product.images) }));
+        const updated = yield prisma_1.default.product.update({
+            where: { id: productId },
+            data: { quantity: product.quantity + quantity }
+        });
+        return (0, modules_1.successResponse)(res, 'success', parseImages(updated));
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, 'error', error.message);
@@ -232,21 +225,24 @@ const selectProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return res.status(400).json({ error: result.error.format() });
         }
         const { productId, quantity, orderMethod } = result.data;
-        const product = yield Models_1.Product.findByPk(productId);
+        const product = yield prisma_1.default.product.findUnique({ where: { id: productId } });
         if (!product) {
             return res.status(404).json({ error: 'Product not found' });
         }
         if (product.quantity < quantity) {
             return res.status(400).json({ error: 'Product quantity is not enough' });
         }
-        const productTransaction = yield ProductTransaction_1.ProductTransaction.create({
-            productId,
-            quantity,
-            buyerId: req.user.id,
-            sellerId: product.userId,
-            price: product.price * quantity - product.discount * quantity,
-            orderMethod,
-            date: new Date()
+        const price = new library_1.Decimal(product.price).mul(quantity).sub(new library_1.Decimal(product.discount || 0).mul(quantity));
+        const productTransaction = yield prisma_1.default.productTransaction.create({
+            data: {
+                productId,
+                quantity,
+                buyerId: req.user.id,
+                sellerId: product.userId,
+                price,
+                orderMethod: orderMethod,
+                date: new Date()
+            }
         });
         return (0, modules_1.successResponse)(res, 'success', productTransaction);
     }
@@ -257,6 +253,7 @@ const selectProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.selectProduct = selectProduct;
 const addProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const { id } = req.user;
         const result = body_1.createProductSchema.safeParse(req.body);
         if (!result.success) {
             return res.status(400).json({
@@ -265,22 +262,43 @@ const addProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 errors: result.error.flatten().fieldErrors,
             });
         }
-        const { name, description, images, categoryId, quantity, price, discount, userId, locationId } = result.data;
-        const newProduct = yield Models_1.Product.create({
-            name,
-            description,
-            images: JSON.stringify(images),
-            categoryId,
-            quantity,
-            price,
-            discount,
-            userId,
-            locationId
+        const { name, description, images, categoryId, quantity, price, discount, weightPerUnit, locationId, state, lga, address } = result.data;
+        // Create a Location if state/lga/address provided and no locationId given
+        let resolvedLocationId = locationId || null;
+        if (!resolvedLocationId && (state || lga || address)) {
+            const location = yield prisma_1.default.location.create({
+                data: {
+                    state: state || null,
+                    lga: lga || null,
+                    address: address || null,
+                    userId: id,
+                }
+            });
+            resolvedLocationId = location.id;
+        }
+        const newProduct = yield prisma_1.default.product.create({
+            data: {
+                name,
+                description,
+                images: images && images.length > 0 ? JSON.stringify(images) : null,
+                categoryId,
+                quantity,
+                price,
+                discount,
+                weightPerUnit,
+                userId: id,
+                locationId: resolvedLocationId,
+                approved: false
+            },
+            include: {
+                category: { select: { id: true, name: true, description: true } },
+            }
         });
-        return (0, modules_1.successResponse)(res, 'Product added successfully', newProduct);
+        return (0, modules_1.successResponse)(res, 'Product added successfully', parseImages(newProduct));
     }
     catch (error) {
-        return (0, modules_1.errorResponse)(res, 'error', 'Failed to add product');
+        console.error('Error adding product:', error);
+        return (0, modules_1.errorResponse)(res, 'error', error.message || 'Failed to add product');
     }
 });
 exports.addProduct = addProduct;
@@ -295,10 +313,9 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         });
     }
     try {
-        const updated = yield Models_1.Product.update(result.data, {
-            where: {
-                id: id
-            }
+        yield prisma_1.default.product.update({
+            where: { id: Number(id) },
+            data: result.data
         });
         return (0, modules_1.successResponse)(res, 'success', "Product updated successfully");
     }
@@ -310,10 +327,8 @@ exports.updateProduct = updateProduct;
 const deleteProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
-        yield Models_1.Product.destroy({
-            where: {
-                id
-            }
+        yield prisma_1.default.product.delete({
+            where: { id: Number(id) }
         });
         return (0, modules_1.successResponse)(res, 'success', "Product deleted successfully");
     }
@@ -325,51 +340,25 @@ exports.deleteProduct = deleteProduct;
 const getProductTransactionById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
-        const productTransaction = yield ProductTransaction_1.ProductTransaction.findByPk(id, {
-            include: [{
-                    model: Models_1.Product,
-                    include: [{
-                            model: Models_1.Category,
-                        }, {
-                            model: Models_1.Location,
-                            as: 'pickupLocation'
-                        }]
-                }, {
-                    model: Models_1.Order,
-                    as: 'order',
-                    include: [
-                        {
-                            model: Models_1.User,
-                            as: 'rider',
-                            attributes: { exclude: ['password', 'fcmToken'] },
-                            include: [{
-                                    model: Models_1.Profile,
-                                    attributes: ['id', 'avatar', 'firstName', 'lastName']
-                                }]
-                        }, {
-                            model: Models_1.Location,
-                            as: 'dropoffLocation'
-                        }
-                    ]
-                }, {
-                    model: Models_1.Transaction
-                }, {
-                    model: Models_1.User,
-                    as: 'buyer',
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [{
-                            model: Models_1.Profile,
-                            attributes: ['id', 'avatar', 'firstName', 'lastName']
-                        }]
-                }, {
-                    model: Models_1.User,
-                    as: 'seller',
-                    attributes: { exclude: ['password', 'fcmToken'] },
-                    include: [{
-                            model: Models_1.Profile,
-                            attributes: ['id', 'avatar', 'firstName', 'lastName']
-                        }]
-                }]
+        const productTransaction = yield prisma_1.default.productTransaction.findUnique({
+            where: { id: Number(id) },
+            include: {
+                product: {
+                    include: {
+                        category: true,
+                        pickupLocation: true,
+                    }
+                },
+                order: {
+                    include: {
+                        rider: { select: userProfileSelect },
+                        dropoffLocation: true,
+                    }
+                },
+                transactions: true,
+                buyer: { select: userProfileSelect },
+                seller: { select: userProfileSelect },
+            }
         });
         return (0, modules_1.successResponse)(res, 'success', productTransaction);
     }

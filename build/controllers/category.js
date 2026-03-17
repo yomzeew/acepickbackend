@@ -8,14 +8,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteCategory = exports.updateCategory = exports.addCategory = exports.getCategories = void 0;
-const Models_1 = require("../models/Models");
+const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
 const getCategories = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const categories = yield Models_1.Category.findAll({
-            order: [['name', 'ASC']]
+        const categories = yield prisma_1.default.category.findMany({
+            orderBy: { name: 'asc' }
         });
         return (0, modules_1.successResponse)(res, 'success', categories);
     }
@@ -30,7 +33,7 @@ const addCategory = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!name) {
             return (0, modules_1.errorResponse)(res, 'error', 'Category name is required');
         }
-        const newCategory = yield Models_1.Category.create({ name, description });
+        const newCategory = yield prisma_1.default.category.create({ data: { name, description } });
         return (0, modules_1.successResponse)(res, 'Category added successfully', newCategory);
     }
     catch (error) {
@@ -42,14 +45,18 @@ const updateCategory = (req, res) => __awaiter(void 0, void 0, void 0, function*
     try {
         const { id } = req.params;
         const { name, description } = req.body;
-        const category = yield Models_1.Category.findByPk(id);
+        const category = yield prisma_1.default.category.findUnique({ where: { id: Number(id) } });
         if (!category) {
             return (0, modules_1.errorResponse)(res, 'error', 'Category not found');
         }
-        category.name = name || category.name;
-        category.description = description || category.description;
-        yield category.save();
-        return (0, modules_1.successResponse)(res, 'Category updated successfully', category);
+        const updated = yield prisma_1.default.category.update({
+            where: { id: Number(id) },
+            data: {
+                name: name || category.name,
+                description: description || category.description,
+            }
+        });
+        return (0, modules_1.successResponse)(res, 'Category updated successfully', updated);
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, 'error', 'Failed to update category');
@@ -59,11 +66,11 @@ exports.updateCategory = updateCategory;
 const deleteCategory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const category = yield Models_1.Category.findByPk(id);
+        const category = yield prisma_1.default.category.findUnique({ where: { id: Number(id) } });
         if (!category) {
             return (0, modules_1.errorResponse)(res, 'error', 'Category not found');
         }
-        yield category.destroy();
+        yield prisma_1.default.category.delete({ where: { id: Number(id) } });
         return (0, modules_1.successResponse)(res, 'Category deleted successfully');
     }
     catch (error) {

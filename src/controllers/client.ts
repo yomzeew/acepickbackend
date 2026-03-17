@@ -1,34 +1,31 @@
-import { Request, Response } from "express";
-import { Profile, User, Location } from '../models/Models'
+import { Request, Response, NextFunction } from "express";
+import prisma from "../config/prisma";
 import { errorResponse, handleResponse, successResponse } from "../utils/modules";
-import { UserRole } from "../utils/enum";
 
 
 export const getClient = async (req: Request, res: Response) => {
-    let { id } = req.params;
+    const { id } = req.params;
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                email: true,
+                phone: true,
+                status: true,
+                role: true,
+                agreed: true,
+                createdAt: true,
+                updatedAt: true,
+                profile: true,
+                location: true,
+            },
+        })
 
-    // try {
-    const client = await User.findOne({
-        where: { id: id, role: UserRole.CLIENT },
-        attributes: {
-            exclude: ['password', 'fcmToken']
-        },
-        include: [
-            {
-                model: Profile,
-            }, {
-                model: Location
-            }
-        ]
-    });
+        if (!user) return handleResponse(res, 404, false, "Client not found")
 
-    if (!client) {
-        return handleResponse(res, 404, false, 'Client not found');
+        return successResponse(res, "success", user)
+    } catch (error) {
+        return errorResponse(res, "error", error)
     }
-
-    return successResponse(res, 'success', client);
-    // } catch (error) {
-    //     return errorResponse(res, 'error', error);
-    // }
 }
-
