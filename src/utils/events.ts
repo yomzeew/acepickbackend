@@ -34,5 +34,6 @@ export const Listen = {
     JOIN_ROOM: "join_room",
     GET_MSGs: "get_messages",
     PREV_CHATS: "previous_chats",
-    UPLOAD_FILE: "upload_file"
+    UPLOAD_FILE: "upload_file",
+    LEAVE_ROOM: "leave_room"
 }

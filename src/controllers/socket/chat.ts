@@ -27,6 +27,8 @@ const parseMembers = (members: string): string[] => {
 };
 
 export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage) => {
+    // Always use authenticated user id — never trust the client payload
+    const senderId = socket.user.id;
 
     let room = await prisma.chatRoom.findFirst({ where: { name: data.room } })
 
@@ -37,14 +39,14 @@ export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage)
     const message = await prisma.message.create({
         data: {
             text: encryptMessage(data.text),
-            from: data.from,
+            from: senderId,
             timestamp: new Date(),
             chatroomId: room.id
         }
     })
 
     const members = parseMembers(room.members);
-    let to = members.filter((member: string) => member !== data.from)[0];
+    let to = members.filter((member: string) => member !== senderId)[0];
 
     if (!to) return;
 
@@ -55,7 +57,7 @@ export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage)
 
     if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
         let user = await prisma.user.findFirst({
-            where: { id: data.from },
+            where: { id: senderId },
             include: { profile: true }
         })
 
@@ -65,11 +67,17 @@ export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage)
             type: NotificationType.CHAT,
             title: `${senderName} sent you a message`,
             message: data.text,
-            data: { type: 'chat', roomName: room.name, senderId: data.from, senderName },
+            data: { type: 'chat', roomName: room.name, senderId, senderName },
         });
     }
 
-    io.to(room.name).emit(Emit.RECV_MSG, { ...data, timestamp: message.timestamp });
+    io.to(room.name).emit(Emit.RECV_MSG, {
+        from: senderId,
+        to,
+        text: data.text,
+        room: data.room,
+        timestamp: message.timestamp,
+    });
 }
 
 export const onConnect = async (socket: Socket) => {
@@ -205,17 +213,18 @@ export const getMsgs = async (io: Server, socket: Socket, data: any) => {
 
     const members = parseMembers(chatroom.members);
 
-    const normalizedMessages: any[] = []
+    // Sort by timestamp ascending so oldest messages come first
+    const sorted = [...chatroom.messages].sort(
+        (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
 
-    chatroom.messages.forEach((msg: any) => {
-        normalizedMessages.push({
-            to: members.filter((member: string) => member !== msg.from)[0],
-            from: msg.from,
-            text: decryptMessage(msg.text),
-            room: data.room,
-            timestamp: msg.timestamp,
-        })
-    })
+    const normalizedMessages: any[] = sorted.map((msg: any) => ({
+        to: members.filter((member: string) => member !== msg.from)[0],
+        from: msg.from,
+        text: decryptMessage(msg.text),
+        room: data.room,
+        timestamp: msg.timestamp,
+    }));
 
     socket.emit(Emit.RECV_MSGs, normalizedMessages);
 }
@@ -249,7 +258,16 @@ export const getPrevChats = async (io: Server, socket: Socket, data: any) => {
 }
 
 
+export const leaveRoom = async (io: Server, socket: Socket, data: any) => {
+    if (data?.room) {
+        socket.leave(data.room);
+        console.log(`User ${socket.user.id} left room ${data.room}`);
+    }
+}
+
 export const uploadFile = async (io: Server, socket: Socket, data: any) => {
+    // Always use authenticated user id
+    const senderId = socket.user.id;
     const { image, fileName } = data;
 
     const fileExt = path.extname(fileName).toLowerCase();
@@ -295,7 +313,7 @@ export const uploadFile = async (io: Server, socket: Socket, data: any) => {
         const message = await prisma.message.create({
             data: {
                 text: encryptMessage(url),
-                from: data.from,
+                from: senderId,
                 timestamp: new Date(),
                 chatroomId: room.id
             }
@@ -303,7 +321,7 @@ export const uploadFile = async (io: Server, socket: Socket, data: any) => {
 
         // Send push notification to offline recipient
         const fileMembers = parseMembers(room.members);
-        let to = fileMembers.filter((member: string) => member !== data.from)[0];
+        let to = fileMembers.filter((member: string) => member !== senderId)[0];
 
         if (!to) return;
 
@@ -314,7 +332,7 @@ export const uploadFile = async (io: Server, socket: Socket, data: any) => {
 
         if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
             let sender = await prisma.user.findFirst({
-                where: { id: data.from },
+                where: { id: senderId },
                 include: { profile: true }
             })
 
@@ -326,11 +344,17 @@ export const uploadFile = async (io: Server, socket: Socket, data: any) => {
                 type: NotificationType.CHAT,
                 title: `${senderName} sent ${fileLabel}`,
                 message: `You received ${fileLabel} in chat`,
-                data: { type: 'chat', roomName: room.name, senderId: data.from, senderName },
+                data: { type: 'chat', roomName: room.name, senderId, senderName },
             });
         }
 
-        io.to(room.name).emit(Emit.RECV_FILE, { ...message, text: url });
+        io.to(room.name).emit(Emit.RECV_FILE, {
+            from: senderId,
+            to,
+            text: url,
+            room: room.name,
+            timestamp: message.timestamp,
+        });
     } catch (err) {
         console.error("Error uploading chat file to Supabase:", err);
     }

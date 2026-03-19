@@ -2,7 +2,7 @@ import { Server } from 'socket.io';
 import { socketAuthorize } from './middlewares/authorize';
 import prisma from './config/prisma';
 import { Emit, Listen } from './utils/events';
-import { ChatMessage, getContacts, getMsgs, getPrevChats, joinRoom, onConnect, onDisconnect, sendMessage, uploadFile } from './controllers/socket/chat';
+import { ChatMessage, getContacts, getMsgs, getPrevChats, joinRoom, leaveRoom, onConnect, onDisconnect, sendMessage, uploadFile } from './controllers/socket/chat';
 import { NotificationService } from './services/notification';
 import { NotificationType } from './utils/enum';
 
@@ -153,6 +153,8 @@ export const initSocket = (httpServer: any) => {
         socket.on(Listen.GET_CONTACTS, () => getContacts(io, socket));
 
         socket.on(Listen.JOIN_ROOM, (data: any) => joinRoom(io, socket, data))
+
+        socket.on(Listen.LEAVE_ROOM, (data: any) => leaveRoom(io, socket, data))
 
         socket.on(Listen.GET_MSGs, (data: any) => getMsgs(io, socket, data))
 
