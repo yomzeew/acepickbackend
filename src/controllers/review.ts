@@ -152,6 +152,132 @@ export const editReview = async (req: Request, res: Response) => {
     }
 }
 
+// Get reviews received by the authenticated user (as a professional/delivery)
+export const getMyReviews = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.user;
+
+        const reviews = await prisma.review.findMany({
+            where: { professionalUserId: id },
+            include: {
+                clientUser: {
+                    include: {
+                        profile: { select: { firstName: true, lastName: true, avatar: true } }
+                    }
+                },
+                job: { select: { id: true, title: true, description: true } },
+                order: { select: { id: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        // For each review, fetch the associated rating (same job/order + client)
+        const reviewsWithRatings = await Promise.all(
+            reviews.map(async (review) => {
+                const rating = await prisma.rating.findFirst({
+                    where: {
+                        professionalUserId: id,
+                        clientUserId: review.clientUserId!,
+                        ...(review.jobId ? { jobId: review.jobId } : {}),
+                        ...(review.orderId ? { orderId: review.orderId } : {}),
+                    },
+                });
+                return {
+                    id: review.id.toString(),
+                    text: review.text,
+                    rating: rating?.value ?? null,
+                    createdAt: review.createdAt,
+                    jobTitle: review.job?.title ?? null,
+                    jobId: review.jobId,
+                    orderId: review.orderId,
+                    reviewer: review.clientUser?.profile ? {
+                        firstName: review.clientUser.profile.firstName,
+                        lastName: review.clientUser.profile.lastName,
+                        avatar: review.clientUser.profile.avatar,
+                    } : null,
+                };
+            })
+        );
+
+        // Calculate stats
+        const ratingsOnly = reviewsWithRatings.filter(r => r.rating !== null).map(r => r.rating as number);
+        const averageRating = ratingsOnly.length > 0
+            ? ratingsOnly.reduce((a, b) => a + b, 0) / ratingsOnly.length
+            : 0;
+
+        return successResponse(res, 'success', {
+            reviews: reviewsWithRatings,
+            total: reviewsWithRatings.length,
+            averageRating: Math.round(averageRating * 10) / 10,
+        });
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', "Internal server error");
+    }
+};
+
+// Get reviews received by a specific user (public)
+export const getReviewsForUser = async (req: Request, res: Response) => {
+    try {
+        const { userId } = req.params;
+
+        const reviews = await prisma.review.findMany({
+            where: { professionalUserId: userId },
+            include: {
+                clientUser: {
+                    include: {
+                        profile: { select: { firstName: true, lastName: true, avatar: true } }
+                    }
+                },
+                job: { select: { id: true, title: true, description: true } },
+                order: { select: { id: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        const reviewsWithRatings = await Promise.all(
+            reviews.map(async (review) => {
+                const rating = await prisma.rating.findFirst({
+                    where: {
+                        professionalUserId: userId,
+                        clientUserId: review.clientUserId!,
+                        ...(review.jobId ? { jobId: review.jobId } : {}),
+                        ...(review.orderId ? { orderId: review.orderId } : {}),
+                    },
+                });
+                return {
+                    id: review.id.toString(),
+                    text: review.text,
+                    rating: rating?.value ?? null,
+                    createdAt: review.createdAt,
+                    jobTitle: review.job?.title ?? null,
+                    jobId: review.jobId,
+                    orderId: review.orderId,
+                    reviewer: review.clientUser?.profile ? {
+                        firstName: review.clientUser.profile.firstName,
+                        lastName: review.clientUser.profile.lastName,
+                        avatar: review.clientUser.profile.avatar,
+                    } : null,
+                };
+            })
+        );
+
+        const ratingsOnly = reviewsWithRatings.filter(r => r.rating !== null).map(r => r.rating as number);
+        const averageRating = ratingsOnly.length > 0
+            ? ratingsOnly.reduce((a, b) => a + b, 0) / ratingsOnly.length
+            : 0;
+
+        return successResponse(res, 'success', {
+            reviews: reviewsWithRatings,
+            total: reviewsWithRatings.length,
+            averageRating: Math.round(averageRating * 10) / 10,
+        });
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', "Internal server error");
+    }
+};
+
 export const deleteReview = async (req: Request, res: Response) => {
     try {
         const { reviewId } = req.params;

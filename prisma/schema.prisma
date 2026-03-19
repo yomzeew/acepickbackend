@@ -72,10 +72,24 @@ enum TransferStatus {
 }
 
 enum ProductTransactionStatus {
-  pt_pending   @map("pending")
-  pt_ordered   @map("ordered")
-  pt_delivered @map("delivered")
-  pt_disputed  @map("disputed")
+  pt_pending                @map("pending")
+  pt_ordered                @map("ordered")
+  pt_accepted_by_seller     @map("accepted_by_seller")
+  pt_rejected_by_seller     @map("rejected_by_seller")
+  pt_ready_for_delivery     @map("ready_for_delivery")
+  pt_delivered              @map("delivered")
+  pt_awaiting_confirmation  @map("awaiting_confirmation")
+  pt_completed              @map("completed")
+  pt_return_requested       @map("return_requested")
+  pt_returned               @map("returned")
+  pt_cancelled              @map("cancelled")
+  pt_disputed               @map("disputed")
+}
+
+enum ReturnStatus {
+  return_pending  @map("pending")
+  return_approved @map("approved")
+  return_rejected @map("rejected")
 }
 
 enum OrderMethod {
@@ -198,6 +212,9 @@ model User {
   buyerTransactions   ProductTransaction[] @relation("BuyerTransactions")
   sellerTransactions  ProductTransaction[] @relation("SellerTransactions")
   riderOrders         Order[]              @relation("RiderOrders")
+  buyerReturns        ReturnRequest[]      @relation("BuyerReturns")
+  sellerReturns       ReturnRequest[]      @relation("SellerReturns")
+  adminResolvedReturns ReturnRequest[]     @relation("AdminResolvedReturns")
   ledgerEntries       LedgerEntry[]
   notifications       Notification[]
 
@@ -725,6 +742,10 @@ model ProductTransaction {
   orderMethod OrderMethod              @default(self_pickup)
   date        DateTime
 
+  deliveredAt       DateTime?
+  autoReleaseAt     DateTime?
+  paymentReleasedAt DateTime?
+
   productId Int
   product   Product @relation(fields: [productId], references: [id])
   buyerId   String  @db.Uuid
@@ -732,14 +753,39 @@ model ProductTransaction {
   sellerId  String  @db.Uuid
   seller    User    @relation("SellerTransactions", fields: [sellerId], references: [id])
 
-  order        Order?
-  transactions Transaction[]
-  disputes     Dispute[]
+  order          Order?
+  transactions   Transaction[]
+  disputes       Dispute[]
+  returnRequests ReturnRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("product_transactions")
+}
+
+model ReturnRequest {
+  id          Int          @id @default(autoincrement())
+  reason      String
+  description String       @db.Text
+  evidence    String?      @db.Text
+  status      ReturnStatus @default(return_pending)
+
+  productTransactionId Int
+  productTransaction   ProductTransaction @relation(fields: [productTransactionId], references: [id], onDelete: Cascade)
+  buyerId              String             @db.Uuid
+  buyer                User               @relation("BuyerReturns", fields: [buyerId], references: [id])
+  sellerId             String             @db.Uuid
+  seller               User               @relation("SellerReturns", fields: [sellerId], references: [id])
+  resolvedById         String?            @db.Uuid
+  resolvedBy           User?              @relation("AdminResolvedReturns", fields: [resolvedById], references: [id])
+  resolvedAt           DateTime?
+  adminNote            String?            @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("return_requests")
 }
 
 model Rider {

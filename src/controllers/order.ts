@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
-import { deliverySchema, disputeSchema } from "../validation/body";
+import { deliverySchema, disputeSchema, returnRequestSchema, sellerRejectSchema } from "../validation/body";
 import prisma from "../config/prisma";
-import { Accounts, CommissionScope, EntryCategory, OrderMethod, OrderStatus, ProductTransactionStatus, RiderStatus, TransactionStatus, TransactionType, NotificationType } from "../utils/enum";
+import { Accounts, CommissionScope, EntryCategory, OrderMethod, OrderStatus, ProductTransactionStatus, ReturnStatus, RiderStatus, TransactionStatus, TransactionType, NotificationType } from "../utils/enum";
 import { errorResponse, getDistanceFromLatLonInKm, handleResponse, randomId, successResponse } from "../utils/modules";
 import { getOrdersSchema } from "../validation/query";
 import { CommissionService } from "../services/CommissionService";
@@ -842,9 +842,183 @@ export const transportOrder = async (req: Request, res: Response) => {
 };
 
 
+// ─────────────── REUSABLE: Release payment to seller (and rider if delivery) ───────────────
+const AUTO_RELEASE_HOURS = 24;
+
+export const releasePaymentToSeller = async (productTransactionId: number): Promise<void> => {
+    const productTransaction = await prisma.productTransaction.findUnique({
+        where: { id: productTransactionId },
+        include: {
+            buyer: { include: { profile: true } },
+            seller: { include: { profile: true, wallet: true } },
+            order: true,
+        }
+    });
+
+    if (!productTransaction) throw new Error('Product transaction not found');
+    if (productTransaction.paymentReleasedAt) return; // already released
+
+    let amount = Number(productTransaction.price);
+    let commission = await CommissionService.calculateCommission(amount, CommissionScope.PRODUCT);
+    amount = amount - commission;
+
+    // Credit seller wallet
+    if (productTransaction.seller.wallet) {
+        await prisma.wallet.update({
+            where: { id: productTransaction.seller.wallet.id },
+            data: {
+                previousBalance: productTransaction.seller.wallet.currentBalance,
+                currentBalance: Number(productTransaction.seller.wallet.currentBalance) + amount,
+            }
+        });
+    }
+
+    const productCashTransaction = await prisma.transaction.create({
+        data: {
+            userId: productTransaction.seller.id,
+            amount: amount,
+            reference: randomId(12),
+            status: TransactionStatus.SUCCESS as any,
+            currency: 'NGN',
+            timestamp: new Date(),
+            description: 'product sale',
+            jobId: null,
+            productTransactionId: productTransaction.id,
+            type: TransactionType.CREDIT as any,
+        }
+    });
+
+    await LedgerService.createEntry([
+        {
+            transactionId: productCashTransaction.id,
+            userId: productCashTransaction.userId,
+            amount: Number(productCashTransaction.amount) + commission,
+            type: TransactionType.DEBIT,
+            account: Accounts.PLATFORM_ESCROW,
+            category: EntryCategory.PRODUCT
+        },
+        {
+            transactionId: productCashTransaction.id,
+            userId: productCashTransaction.userId,
+            amount: productCashTransaction.amount,
+            type: TransactionType.CREDIT,
+            account: Accounts.PROFESSIONAL_WALLET,
+            category: EntryCategory.PRODUCT
+        },
+        {
+            transactionId: productCashTransaction.id,
+            userId: null,
+            amount: commission,
+            type: TransactionType.CREDIT,
+            account: Accounts.PLATFORM_REVENUE,
+            category: EntryCategory.PRODUCT
+        }
+    ]);
+
+    // Pay rider if delivery order exists
+    if (productTransaction.orderMethod === OrderMethod.DELIVERY && productTransaction.order) {
+        await prisma.order.update({
+            where: { id: productTransaction.order.id },
+            data: { status: OrderStatus.CONFIRM_DELIVERY as any }
+        });
+
+        if (productTransaction.order.riderId) {
+            const rider = await prisma.user.findUnique({
+                where: { id: productTransaction.order.riderId },
+                include: { wallet: true }
+            });
+
+            if (rider) {
+                amount = Number(productTransaction.order.cost);
+                commission = await CommissionService.calculateCommission(amount, CommissionScope.DELIVERY);
+                amount = amount - commission;
+
+                if (rider.wallet) {
+                    await prisma.wallet.update({
+                        where: { id: rider.wallet.id },
+                        data: {
+                            previousBalance: rider.wallet.currentBalance,
+                            currentBalance: Number(rider.wallet.currentBalance) + amount,
+                        }
+                    });
+                }
+
+                const orderTransaction = await prisma.transaction.create({
+                    data: {
+                        userId: rider.id,
+                        amount: amount,
+                        reference: randomId(12),
+                        status: TransactionStatus.SUCCESS as any,
+                        currency: 'NGN',
+                        timestamp: new Date(),
+                        description: 'delivery fee',
+                        jobId: null,
+                        productTransactionId: productTransaction.order.productTransactionId,
+                        type: TransactionType.CREDIT as any,
+                    }
+                });
+
+                await LedgerService.createEntry([
+                    {
+                        transactionId: orderTransaction.id,
+                        userId: orderTransaction.userId,
+                        amount: Number(orderTransaction.amount) + commission,
+                        type: TransactionType.DEBIT,
+                        account: Accounts.PLATFORM_ESCROW,
+                        category: EntryCategory.DELIVERY
+                    },
+                    {
+                        transactionId: orderTransaction.id,
+                        userId: orderTransaction.userId,
+                        amount: orderTransaction.amount,
+                        type: TransactionType.CREDIT,
+                        account: Accounts.PROFESSIONAL_WALLET,
+                        category: EntryCategory.DELIVERY
+                    },
+                    {
+                        transactionId: orderTransaction.id,
+                        userId: null,
+                        amount: commission,
+                        type: TransactionType.CREDIT,
+                        account: Accounts.PLATFORM_REVENUE,
+                        category: EntryCategory.DELIVERY
+                    }
+                ]);
+            }
+        }
+    }
+
+    // Mark payment as released
+    await prisma.productTransaction.update({
+        where: { id: productTransaction.id },
+        data: {
+            status: ProductTransactionStatus.COMPLETED as any,
+            paymentReleasedAt: new Date(),
+        }
+    });
+
+    // Notify seller
+    await NotificationService.create({
+        userId: productTransaction.sellerId,
+        type: NotificationType.PAYMENT,
+        title: 'Payment Released',
+        message: `Payment of ₦${Number(productTransaction.price).toLocaleString()} for "${productTransaction.seller.profile?.firstName}" has been released to your wallet.`,
+        data: { productTransactionId: productTransaction.id },
+    });
+
+    // Notify buyer
+    await NotificationService.create({
+        userId: productTransaction.buyerId,
+        type: NotificationType.ORDER,
+        title: 'Order Completed',
+        message: `Order #${productTransaction.id} has been completed and payment released to seller.`,
+        data: { productTransactionId: productTransaction.id },
+    });
+};
+
+// ─────────────── Buyer: Confirm delivery (now sets awaiting_confirmation) ───────────────
 export const confirmDelivery = async (req: Request, res: Response) => {
     const { id } = req.user;
-
     const { productTransactionId } = req.params;
 
     try {
@@ -852,167 +1026,56 @@ export const confirmDelivery = async (req: Request, res: Response) => {
             where: { id: Number(productTransactionId) },
             include: {
                 buyer: { include: { profile: true } },
-                seller: { include: { profile: true, wallet: true } },
+                seller: { include: { profile: true } },
                 order: true,
             }
         });
 
         if (!productTransaction) {
-            return handleResponse(res, 404, false, 'Product transaction not found')
+            return handleResponse(res, 404, false, 'Product transaction not found');
         }
 
         if (productTransaction.buyerId !== id) {
-            return handleResponse(res, 400, false, 'You are not authorized to confirm this order')
+            return handleResponse(res, 400, false, 'You are not authorized to confirm this order');
         }
 
+        // For delivery orders, rider must have delivered first
         if (productTransaction.order && (productTransaction.order.status as any) !== OrderStatus.DELIVERED) {
-            return handleResponse(res, 400, false, 'Order not delivered')
+            return handleResponse(res, 400, false, 'Order has not been delivered yet');
         }
 
-        let amount = Number(productTransaction.price);
-        let commission = await CommissionService.calculateCommission(amount, CommissionScope.PRODUCT);
-        amount = amount - commission
+        const now = new Date();
+        const autoReleaseAt = new Date(now.getTime() + AUTO_RELEASE_HOURS * 60 * 60 * 1000);
 
-        // Credit seller wallet
-        if (productTransaction.seller.wallet) {
-            await prisma.wallet.update({
-                where: { id: productTransaction.seller.wallet.id },
-                data: {
-                    previousBalance: productTransaction.seller.wallet.currentBalance,
-                    currentBalance: Number(productTransaction.seller.wallet.currentBalance) + amount,
-                }
-            });
-        }
-
+        // Move to awaiting_confirmation — seller must confirm before payment is released
         await prisma.productTransaction.update({
             where: { id: productTransaction.id },
-            data: { status: ProductTransactionStatus.DELIVERED as any }
-        });
-
-        const productCashTransaction = await prisma.transaction.create({
             data: {
-                userId: productTransaction.seller.id,
-                amount: amount,
-                reference: randomId(12),
-                status: TransactionStatus.SUCCESS as any,
-                currency: 'NGN',
-                timestamp: new Date(),
-                description: 'product sale',
-                jobId: null,
-                productTransactionId: productTransaction.id,
-                type: TransactionType.CREDIT as any,
+                status: ProductTransactionStatus.AWAITING_CONFIRMATION as any,
+                deliveredAt: now,
+                autoReleaseAt: autoReleaseAt,
             }
-        })
-
-        await LedgerService.createEntry([
-            {
-                transactionId: productCashTransaction.id,
-                userId: productCashTransaction.userId,
-                amount: Number(productCashTransaction.amount) + commission,
-                type: TransactionType.DEBIT,
-                account: Accounts.PLATFORM_ESCROW,
-                category: EntryCategory.PRODUCT
-            },
-            {
-                transactionId: productCashTransaction.id,
-                userId: productCashTransaction.userId,
-                amount: productCashTransaction.amount,
-                type: TransactionType.CREDIT,
-                account: Accounts.PROFESSIONAL_WALLET,
-                category: EntryCategory.PRODUCT
-            },
-            {
-                transactionId: productCashTransaction.id,
-                userId: null,
-                amount: commission,
-                type: TransactionType.CREDIT,
-                account: Accounts.PLATFORM_REVENUE,
-                category: EntryCategory.PRODUCT
-            }
-        ])
-
-        if (productTransaction.orderMethod === OrderMethod.DELIVERY && productTransaction.order) {
-            await prisma.order.update({
-                where: { id: productTransaction.order.id },
-                data: { status: OrderStatus.CONFIRM_DELIVERY as any }
-            });
-
-            const rider = await prisma.user.findUnique({
-                where: { id: productTransaction.order.riderId! },
-                include: { wallet: true }
-            })
-
-            if (!rider) {
-                throw new Error('Rider not found')
-            }
-
-            amount = Number(productTransaction.order.cost);
-            commission = await CommissionService.calculateCommission(amount, CommissionScope.DELIVERY);
-            amount = amount - commission
-
-            if (rider.wallet) {
-                await prisma.wallet.update({
-                    where: { id: rider.wallet.id },
-                    data: {
-                        previousBalance: rider.wallet.currentBalance,
-                        currentBalance: Number(rider.wallet.currentBalance) + amount,
-                    }
-                });
-            }
-
-            const orderTransaction = await prisma.transaction.create({
-                data: {
-                    userId: rider.id,
-                    amount: amount,
-                    reference: randomId(12),
-                    status: TransactionStatus.SUCCESS as any,
-                    currency: 'NGN',
-                    timestamp: new Date(),
-                    description: 'wallet deposit',
-                    jobId: null,
-                    productTransactionId: productTransaction.order.productTransactionId,
-                    type: TransactionType.CREDIT as any,
-                }
-            })
-
-            await LedgerService.createEntry([
-                {
-                    transactionId: orderTransaction.id,
-                    userId: orderTransaction.userId,
-                    amount: Number(orderTransaction.amount) + commission,
-                    type: TransactionType.DEBIT,
-                    account: Accounts.PLATFORM_ESCROW,
-                    category: EntryCategory.DELIVERY
-                },
-                {
-                    transactionId: orderTransaction.id,
-                    userId: orderTransaction.userId,
-                    amount: orderTransaction.amount,
-                    type: TransactionType.CREDIT,
-                    account: Accounts.PROFESSIONAL_WALLET,
-                    category: EntryCategory.DELIVERY
-                },
-                {
-                    transactionId: orderTransaction.id,
-                    userId: null,
-                    amount: commission,
-                    type: TransactionType.CREDIT,
-                    account: Accounts.PLATFORM_REVENUE,
-                    category: EntryCategory.DELIVERY
-                }
-            ])
-        }
+        });
 
         await prisma.activity.create({
             data: {
                 userId: productTransaction.buyerId,
-                action: `${productTransaction.buyer.profile?.firstName} ${productTransaction.buyer.profile?.lastName} has confirmed delivery of Order #${productTransaction.order?.id}`,
+                action: `${productTransaction.buyer.profile?.firstName} ${productTransaction.buyer.profile?.lastName} has confirmed receiving Order #${productTransaction.id}`,
                 type: 'Order confirmation',
                 status: 'act_success' as any
             }
-        })
+        });
 
-        return successResponse(res, 'success', 'Order confirmed successfully');
+        // Notify seller to confirm order completion
+        await NotificationService.create({
+            userId: productTransaction.sellerId,
+            type: NotificationType.ORDER,
+            title: 'Buyer Confirmed Delivery',
+            message: `Buyer has confirmed receiving order #${productTransaction.id}. Please confirm order completion to release payment. Auto-release in ${AUTO_RELEASE_HOURS}h if no action taken.`,
+            data: { productTransactionId: productTransaction.id },
+        });
+
+        return successResponse(res, 'success', 'Delivery confirmed. Awaiting seller confirmation to release payment.');
     } catch (error) {
         console.log(error);
         return errorResponse(res, 'error', 'Error confirming delivery');
@@ -1336,5 +1399,555 @@ export const getOrderById = async (req: Request, res: Response) => {
     } catch (error) {
         console.log(error);
         return errorResponse(res, 'error', 'Error fetching order');
+    }
+};
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SELLER ORDER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─────────────── Seller: Accept Order ───────────────
+export const sellerAcceptOrder = async (req: Request, res: Response) => {
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+
+    try {
+        const pt = await prisma.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                buyer: { include: { profile: true } },
+                seller: { include: { profile: true } },
+                product: true,
+            }
+        });
+
+        if (!pt) return handleResponse(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id) return handleResponse(res, 403, false, 'Only the seller can accept this order');
+
+        const status = pt.status as string;
+        if (status !== ProductTransactionStatus.ORDERED) {
+            return handleResponse(res, 400, false, `Cannot accept order in "${status}" status. Must be "ordered".`);
+        }
+
+        await prisma.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: ProductTransactionStatus.ACCEPTED_BY_SELLER as any }
+        });
+
+        await NotificationService.create({
+            userId: pt.buyerId,
+            type: NotificationType.ORDER,
+            title: 'Order Accepted by Seller',
+            message: `${pt.seller.profile?.firstName} has accepted your order for "${pt.product.name}". Preparing for delivery.`,
+            data: { productTransactionId: pt.id },
+        });
+
+        await prisma.activity.create({
+            data: {
+                userId: id,
+                action: `Seller accepted order #${pt.id} for product "${pt.product.name}"`,
+                type: 'Seller order acceptance',
+                status: 'act_success' as any,
+            }
+        });
+
+        return successResponse(res, 'success', 'Order accepted successfully');
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', 'Error accepting order');
+    }
+};
+
+// ─────────────── Seller: Reject Order ───────────────
+export const sellerRejectOrder = async (req: Request, res: Response) => {
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+
+    const result = sellerRejectSchema.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ message: 'Validation error', errors: result.error.flatten() });
+    }
+
+    const { reason } = result.data;
+
+    try {
+        const pt = await prisma.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                buyer: { include: { profile: true, wallet: true } },
+                seller: { include: { profile: true } },
+                product: true,
+                transactions: true,
+            }
+        });
+
+        if (!pt) return handleResponse(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id) return handleResponse(res, 403, false, 'Only the seller can reject this order');
+
+        const status = pt.status as string;
+        if (status !== ProductTransactionStatus.ORDERED) {
+            return handleResponse(res, 400, false, `Cannot reject order in "${status}" status. Must be "ordered".`);
+        }
+
+        // Reject the order
+        await prisma.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: ProductTransactionStatus.REJECTED_BY_SELLER as any }
+        });
+
+        // Restore stock
+        await prisma.product.update({
+            where: { id: pt.productId },
+            data: { quantity: { increment: pt.quantity } }
+        });
+
+        // Refund buyer: move funds from escrow back to buyer wallet
+        if (pt.buyer.wallet) {
+            const refundAmount = Number(pt.price);
+            await prisma.wallet.update({
+                where: { id: pt.buyer.wallet.id },
+                data: {
+                    previousBalance: pt.buyer.wallet.currentBalance,
+                    currentBalance: Number(pt.buyer.wallet.currentBalance) + refundAmount,
+                }
+            });
+
+            const refundTx = await prisma.transaction.create({
+                data: {
+                    userId: pt.buyerId,
+                    amount: refundAmount,
+                    reference: randomId(12),
+                    status: TransactionStatus.SUCCESS as any,
+                    currency: 'NGN',
+                    timestamp: new Date(),
+                    description: 'order refund - seller rejected',
+                    productTransactionId: pt.id,
+                    type: TransactionType.CREDIT as any,
+                }
+            });
+
+            await LedgerService.createEntry([
+                {
+                    transactionId: refundTx.id,
+                    userId: pt.buyerId,
+                    amount: refundAmount,
+                    type: TransactionType.DEBIT,
+                    account: Accounts.PLATFORM_ESCROW,
+                    category: EntryCategory.PRODUCT
+                },
+                {
+                    transactionId: refundTx.id,
+                    userId: pt.buyerId,
+                    amount: refundAmount,
+                    type: TransactionType.CREDIT,
+                    account: Accounts.USER_WALLET,
+                    category: EntryCategory.PRODUCT
+                }
+            ]);
+        }
+
+        await NotificationService.create({
+            userId: pt.buyerId,
+            type: NotificationType.ORDER,
+            title: 'Order Rejected by Seller',
+            message: `${pt.seller.profile?.firstName} has rejected your order for "${pt.product.name}". Reason: ${reason}. Your payment has been refunded.`,
+            data: { productTransactionId: pt.id },
+        });
+
+        return successResponse(res, 'success', 'Order rejected. Buyer has been refunded.');
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', 'Error rejecting order');
+    }
+};
+
+// ─────────────── Seller: Mark Ready for Delivery ───────────────
+export const sellerMarkReady = async (req: Request, res: Response) => {
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+
+    try {
+        const pt = await prisma.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                buyer: { include: { profile: true } },
+                seller: { include: { profile: true } },
+                product: true,
+                order: true,
+            }
+        });
+
+        if (!pt) return handleResponse(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id) return handleResponse(res, 403, false, 'Only the seller can mark this order ready');
+
+        const status = pt.status as string;
+        if (status !== ProductTransactionStatus.ACCEPTED_BY_SELLER) {
+            return handleResponse(res, 400, false, `Cannot mark ready in "${status}" status. Must be "accepted_by_seller".`);
+        }
+
+        await prisma.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: ProductTransactionStatus.READY_FOR_DELIVERY as any }
+        });
+
+        await NotificationService.create({
+            userId: pt.buyerId,
+            type: NotificationType.ORDER,
+            title: 'Order Ready',
+            message: `Your order for "${pt.product.name}" is ready for ${pt.orderMethod === 'delivery' ? 'pickup by rider' : 'self-pickup'}.`,
+            data: { productTransactionId: pt.id },
+        });
+
+        await prisma.activity.create({
+            data: {
+                userId: id,
+                action: `Seller marked order #${pt.id} as ready for delivery`,
+                type: 'Seller order ready',
+                status: 'act_success' as any,
+            }
+        });
+
+        return successResponse(res, 'success', 'Order marked as ready for delivery');
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', 'Error marking order ready');
+    }
+};
+
+// ─────────────── Seller: Confirm Order Completion (releases payment) ───────────────
+export const sellerConfirmCompletion = async (req: Request, res: Response) => {
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+
+    try {
+        const pt = await prisma.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                seller: { include: { profile: true } },
+                product: true,
+            }
+        });
+
+        if (!pt) return handleResponse(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id) return handleResponse(res, 403, false, 'Only the seller can confirm completion');
+
+        const status = pt.status as string;
+        if (status !== ProductTransactionStatus.AWAITING_CONFIRMATION) {
+            return handleResponse(res, 400, false, `Cannot confirm in "${status}" status. Must be "awaiting_confirmation".`);
+        }
+
+        // Release payment to seller
+        await releasePaymentToSeller(pt.id);
+
+        await prisma.activity.create({
+            data: {
+                userId: id,
+                action: `Seller confirmed completion of order #${pt.id}. Payment released.`,
+                type: 'Seller order completion',
+                status: 'act_success' as any,
+            }
+        });
+
+        return successResponse(res, 'success', 'Order confirmed as completed. Payment has been released.');
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', 'Error confirming order completion');
+    }
+};
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  RETURN REQUEST SYSTEM
+// ═══════════════════════════════════════════════════════════════════════
+
+// ─────────────── Buyer: Request Return ───────────────
+export const requestReturn = async (req: Request, res: Response) => {
+    const { id } = req.user;
+
+    const result = returnRequestSchema.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ message: 'Validation error', errors: result.error.flatten() });
+    }
+
+    const { reason, description, evidence, productTransactionId } = result.data;
+
+    try {
+        const pt = await prisma.productTransaction.findUnique({
+            where: { id: productTransactionId },
+            include: {
+                buyer: { include: { profile: true } },
+                seller: { include: { profile: true } },
+                product: true,
+            }
+        });
+
+        if (!pt) return handleResponse(res, 404, false, 'Product transaction not found');
+        if (pt.buyerId !== id) return handleResponse(res, 403, false, 'Only the buyer can request a return');
+
+        const status = pt.status as string;
+        // Can only request return during awaiting_confirmation or delivered states
+        const returnableStatuses = [
+            ProductTransactionStatus.AWAITING_CONFIRMATION,
+            ProductTransactionStatus.DELIVERED,
+        ];
+        if (!returnableStatuses.includes(status as any)) {
+            return handleResponse(res, 400, false, `Cannot request return in "${status}" status.`);
+        }
+
+        // Check return window (24h from delivery for perishables, 7 days for normal items)
+        if (pt.deliveredAt) {
+            const hoursSinceDelivery = (Date.now() - pt.deliveredAt.getTime()) / (1000 * 60 * 60);
+            const maxReturnHours = 7 * 24; // 7 days default
+            if (hoursSinceDelivery > maxReturnHours) {
+                return handleResponse(res, 400, false, 'Return window has expired (7 days after delivery).');
+            }
+        }
+
+        // Check if there's already a pending return request
+        const existingReturn = await prisma.returnRequest.findFirst({
+            where: {
+                productTransactionId: pt.id,
+                status: ReturnStatus.PENDING as any,
+            }
+        });
+
+        if (existingReturn) {
+            return handleResponse(res, 400, false, 'A return request is already pending for this order.');
+        }
+
+        const returnRequest = await prisma.returnRequest.create({
+            data: {
+                reason,
+                description,
+                evidence,
+                productTransactionId: pt.id,
+                buyerId: id,
+                sellerId: pt.sellerId,
+            }
+        });
+
+        // Update product transaction status
+        await prisma.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: ProductTransactionStatus.RETURN_REQUESTED as any }
+        });
+
+        // Notify seller
+        await NotificationService.create({
+            userId: pt.sellerId,
+            type: NotificationType.ORDER,
+            title: 'Return Request Received',
+            message: `Buyer ${pt.buyer.profile?.firstName} has requested a return for "${pt.product.name}". Reason: ${reason}`,
+            data: { productTransactionId: pt.id, returnRequestId: returnRequest.id },
+        });
+
+        await prisma.activity.create({
+            data: {
+                userId: id,
+                action: `Buyer requested return for order #${pt.id}. Reason: ${reason}`,
+                type: 'Return request',
+                status: 'act_pending' as any,
+            }
+        });
+
+        return successResponse(res, 'success', returnRequest);
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', 'Error creating return request');
+    }
+};
+
+// ─────────────── Admin: Resolve Return Request ───────────────
+export const resolveReturnRequest = async (req: Request, res: Response) => {
+    const { id } = req.user;
+    const { returnRequestId } = req.params;
+    const { resolution, adminNote } = req.body; // resolution: 'approve' | 'reject'
+
+    if (!resolution || !['approve', 'reject'].includes(resolution)) {
+        return handleResponse(res, 400, false, 'Resolution must be "approve" or "reject"');
+    }
+
+    try {
+        const returnReq = await prisma.returnRequest.findUnique({
+            where: { id: Number(returnRequestId) },
+            include: {
+                productTransaction: {
+                    include: {
+                        buyer: { include: { profile: true, wallet: true } },
+                        seller: { include: { profile: true } },
+                        product: true,
+                    }
+                }
+            }
+        });
+
+        if (!returnReq) return handleResponse(res, 404, false, 'Return request not found');
+
+        const pt = returnReq.productTransaction;
+
+        if (resolution === 'approve') {
+            // Approve return: refund buyer, restore stock
+            await prisma.returnRequest.update({
+                where: { id: returnReq.id },
+                data: {
+                    status: ReturnStatus.APPROVED as any,
+                    resolvedById: id,
+                    resolvedAt: new Date(),
+                    adminNote: adminNote || null,
+                }
+            });
+
+            await prisma.productTransaction.update({
+                where: { id: pt.id },
+                data: { status: ProductTransactionStatus.RETURNED as any }
+            });
+
+            // Restore stock
+            await prisma.product.update({
+                where: { id: pt.productId },
+                data: { quantity: { increment: pt.quantity } }
+            });
+
+            // Refund buyer
+            if (pt.buyer.wallet) {
+                const refundAmount = Number(pt.price);
+                await prisma.wallet.update({
+                    where: { id: pt.buyer.wallet.id },
+                    data: {
+                        previousBalance: pt.buyer.wallet.currentBalance,
+                        currentBalance: Number(pt.buyer.wallet.currentBalance) + refundAmount,
+                    }
+                });
+
+                const refundTx = await prisma.transaction.create({
+                    data: {
+                        userId: pt.buyerId,
+                        amount: refundAmount,
+                        reference: randomId(12),
+                        status: TransactionStatus.SUCCESS as any,
+                        currency: 'NGN',
+                        timestamp: new Date(),
+                        description: 'return refund',
+                        productTransactionId: pt.id,
+                        type: TransactionType.CREDIT as any,
+                    }
+                });
+
+                await LedgerService.createEntry([
+                    {
+                        transactionId: refundTx.id,
+                        userId: pt.buyerId,
+                        amount: refundAmount,
+                        type: TransactionType.DEBIT,
+                        account: Accounts.PLATFORM_ESCROW,
+                        category: EntryCategory.PRODUCT
+                    },
+                    {
+                        transactionId: refundTx.id,
+                        userId: pt.buyerId,
+                        amount: refundAmount,
+                        type: TransactionType.CREDIT,
+                        account: Accounts.USER_WALLET,
+                        category: EntryCategory.PRODUCT
+                    }
+                ]);
+            }
+
+            await NotificationService.create({
+                userId: pt.buyerId,
+                type: NotificationType.ORDER,
+                title: 'Return Approved',
+                message: `Your return request for "${pt.product.name}" has been approved. Refund has been processed.`,
+                data: { productTransactionId: pt.id },
+            });
+
+            await NotificationService.create({
+                userId: pt.sellerId,
+                type: NotificationType.ORDER,
+                title: 'Return Approved by Admin',
+                message: `A return request for "${pt.product.name}" has been approved. Payment will not be released.`,
+                data: { productTransactionId: pt.id },
+            });
+        } else {
+            // Reject return: continue normal flow, release payment if awaiting
+            await prisma.returnRequest.update({
+                where: { id: returnReq.id },
+                data: {
+                    status: ReturnStatus.REJECTED as any,
+                    resolvedById: id,
+                    resolvedAt: new Date(),
+                    adminNote: adminNote || null,
+                }
+            });
+
+            // If payment was on hold, release it now
+            if ((pt.status as string) === ProductTransactionStatus.RETURN_REQUESTED) {
+                await prisma.productTransaction.update({
+                    where: { id: pt.id },
+                    data: { status: ProductTransactionStatus.AWAITING_CONFIRMATION as any }
+                });
+                await releasePaymentToSeller(pt.id);
+            }
+
+            await NotificationService.create({
+                userId: pt.buyerId,
+                type: NotificationType.ORDER,
+                title: 'Return Request Rejected',
+                message: `Your return request for "${pt.product.name}" has been rejected. ${adminNote || ''}`,
+                data: { productTransactionId: pt.id },
+            });
+
+            await NotificationService.create({
+                userId: pt.sellerId,
+                type: NotificationType.ORDER,
+                title: 'Return Rejected — Payment Released',
+                message: `Return request for "${pt.product.name}" was rejected. Payment has been released to your wallet.`,
+                data: { productTransactionId: pt.id },
+            });
+        }
+
+        return successResponse(res, 'success', `Return request ${resolution}d successfully`);
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', 'Error resolving return request');
+    }
+};
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  AUTO-RELEASE PAYMENTS (cron / admin endpoint)
+// ═══════════════════════════════════════════════════════════════════════
+export const autoReleasePayments = async (_req: Request, res: Response) => {
+    try {
+        const now = new Date();
+
+        // Find all product transactions where autoReleaseAt has passed and payment not yet released
+        const pendingRelease = await prisma.productTransaction.findMany({
+            where: {
+                status: { in: ['pt_awaiting_confirmation'] },
+                autoReleaseAt: { lte: now },
+                paymentReleasedAt: null,
+            }
+        });
+
+        if (pendingRelease.length === 0) {
+            return successResponse(res, 'success', { released: 0 });
+        }
+
+        let releasedCount = 0;
+        for (const pt of pendingRelease) {
+            try {
+                await releasePaymentToSeller(pt.id);
+                releasedCount++;
+            } catch (err) {
+                console.error(`Failed to auto-release payment for PT #${pt.id}:`, err);
+            }
+        }
+
+        return successResponse(res, 'success', { released: releasedCount, total: pendingRelease.length });
+    } catch (error) {
+        console.log(error);
+        return errorResponse(res, 'error', 'Error auto-releasing payments');
     }
 };

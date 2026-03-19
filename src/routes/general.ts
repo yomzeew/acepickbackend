@@ -24,9 +24,9 @@ import { addProduct, deleteProduct, getProducts, getMyProducts, updateProduct, s
 import { addCategory, deleteCategory, getCategories, updateCategory } from "../controllers/category";
 import { uploads } from "../services/upload";
 import { uploadFiles } from "../controllers/upload";
-import { acceptOrder, cancelOrder, confirmDelivery, confirmPickup, createOrder, deliverOrder, disputeOrder, enRouteToPickup, arrivedAtPickup, arrivedAtDropoff, expireStaleOrders, retryRiderSearch, getOrderById, getNearestPaidOrders, getOrdersBuyer, getOrdersRider, getOrdersSeller, pickupOrder, resolveDispute, transportOrder, cleanupExpiredUnpaidOrders, retryExpiredOrder } from "../controllers/order";
+import { acceptOrder, cancelOrder, confirmDelivery, confirmPickup, createOrder, deliverOrder, disputeOrder, enRouteToPickup, arrivedAtPickup, arrivedAtDropoff, expireStaleOrders, retryRiderSearch, getOrderById, getNearestPaidOrders, getOrdersBuyer, getOrdersRider, getOrdersSeller, pickupOrder, resolveDispute, transportOrder, cleanupExpiredUnpaidOrders, retryExpiredOrder, sellerAcceptOrder, sellerRejectOrder, sellerMarkReady, sellerConfirmCompletion, requestReturn, resolveReturnRequest, autoReleasePayments } from "../controllers/order";
 import { giveRating, isRated } from "../controllers/rating";
-import { deleteReview, editReview, giveReview } from "../controllers/review";
+import { deleteReview, editReview, giveReview, getMyReviews, getReviewsForUser } from "../controllers/review";
 import { getClientDashboard, getProfessionalDashboard, getDeliveryDashboard } from "../controllers/dashboard";
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications } from "../controllers/notifications";
 
@@ -192,8 +192,23 @@ routes.post('/orders/expire-stale', allowRoles(UserRole.ADMIN), expireStaleOrder
 routes.post('/orders/dispute', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), disputeOrder);
 routes.post('/orders/dispute/resolve/:disputeId', resolveDispute);
 
+// Seller order management
+routes.put('/orders/seller-accept/:productTransactionId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), sellerAcceptOrder);
+routes.put('/orders/seller-reject/:productTransactionId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), sellerRejectOrder);
+routes.put('/orders/seller-mark-ready/:productTransactionId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), sellerMarkReady);
+routes.put('/orders/seller-confirm/:productTransactionId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), sellerConfirmCompletion);
+
+// Return requests
+routes.post('/orders/return-request', allowRoles(UserRole.CLIENT), requestReturn);
+routes.post('/orders/return-request/resolve/:returnRequestId', allowRoles(UserRole.ADMIN), resolveReturnRequest);
+
+// Auto-release payments (cron / admin)
+routes.post('/orders/auto-release-payments', allowRoles(UserRole.ADMIN), autoReleasePayments);
+
 routes.post('/ratings', giveRating);
 routes.get('/is-rated', isRated);
+routes.get('/reviews/my', getMyReviews);
+routes.get('/reviews/user/:userId', getReviewsForUser);
 routes.post('/reviews', giveReview);
 routes.put('/reviews/:reviewId', editReview);
 routes.delete('/reviews/:reviewId', deleteReview);

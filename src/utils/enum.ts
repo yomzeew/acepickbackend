@@ -105,8 +105,22 @@ export enum ENV {
 export enum ProductTransactionStatus {
     PENDING = 'pending',
     ORDERED = 'ordered',
+    ACCEPTED_BY_SELLER = 'accepted_by_seller',
+    REJECTED_BY_SELLER = 'rejected_by_seller',
+    READY_FOR_DELIVERY = 'ready_for_delivery',
     DELIVERED = 'delivered',
+    AWAITING_CONFIRMATION = 'awaiting_confirmation',
+    COMPLETED = 'completed',
+    RETURN_REQUESTED = 'return_requested',
+    RETURNED = 'returned',
+    CANCELLED = 'cancelled',
     DISPUTED = 'disputed'
+}
+
+export enum ReturnStatus {
+    PENDING = 'pending',
+    APPROVED = 'approved',
+    REJECTED = 'rejected'
 }
 
 export enum OrderMethod {

@@ -1112,5 +1112,29 @@ export const disputeSchema = z.object({
     }
 );
 
+export const returnRequestSchema = z.object({
+    reason: z
+        .string({ required_error: "Reason is required" })
+        .min(1, "Reason cannot be empty"),
 
+    description: z
+        .string({ required_error: "Description is required" })
+        .min(5, "Description must be at least 5 characters"),
 
+    evidence: z
+        .string()
+        .url("Evidence must be a valid URL")
+        .optional()
+        .or(z.literal("").transform(() => undefined)),
+
+    productTransactionId: z
+        .number({ required_error: "Product transaction ID is required" })
+        .int("Product transaction ID must be an integer")
+        .positive("Product transaction ID must be positive"),
+});
+
+export const sellerRejectSchema = z.object({
+    reason: z
+        .string({ required_error: "Reason is required" })
+        .min(1, "Please provide a reason for rejection"),
+});
