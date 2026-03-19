@@ -17,6 +17,15 @@ export interface ChatMessage {
     room: string;
 }
 
+/** Parse members string — handles both comma-separated and JSON array formats */
+const parseMembers = (members: string): string[] => {
+    try {
+        const parsed = JSON.parse(members);
+        if (Array.isArray(parsed)) return parsed.map((m: string) => m.trim());
+    } catch {}
+    return members.split(",").map(m => m.trim()).filter(Boolean);
+};
+
 export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage) => {
 
     let room = await prisma.chatRoom.findFirst({ where: { name: data.room } })
@@ -34,7 +43,10 @@ export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage)
         }
     })
 
-    let to = room.members.split(",").filter((member: string) => member !== data.from)[0];
+    const members = parseMembers(room.members);
+    let to = members.filter((member: string) => member !== data.from)[0];
+
+    if (!to) return;
 
     let otherUser = await prisma.user.findUnique({
         where: { id: to },
@@ -178,7 +190,7 @@ export const joinRoom = async (io: Server, socket: Socket, data: any) => {
         }
     }
 
-    io.to(room.name).emit(Emit.JOINED_ROOM, room.name);
+    socket.emit(Emit.JOINED_ROOM, room.name);
 
     console.log("joined room", room.name);
 }
@@ -189,20 +201,23 @@ export const getMsgs = async (io: Server, socket: Socket, data: any) => {
         include: { messages: true }
     })
 
-    const members = chatroom?.members.split(",");
+    if (!chatroom) return;
+
+    const members = parseMembers(chatroom.members);
 
     const normalizedMessages: any[] = []
 
-    chatroom?.messages.forEach((msg: any) => {
+    chatroom.messages.forEach((msg: any) => {
         normalizedMessages.push({
-            to: members?.filter((member: string) => member !== msg.from)[0],
+            to: members.filter((member: string) => member !== msg.from)[0],
             from: msg.from,
             text: decryptMessage(msg.text),
+            room: data.room,
             timestamp: msg.timestamp,
         })
     })
 
-    io.to(data.room).emit(Emit.RECV_MSGs, normalizedMessages);
+    socket.emit(Emit.RECV_MSGs, normalizedMessages);
 }
 
 export const getPrevChats = async (io: Server, socket: Socket, data: any) => {
@@ -212,9 +227,9 @@ export const getPrevChats = async (io: Server, socket: Socket, data: any) => {
     });
 
     const partners = chatrooms.map((room: any) => {
-        const members = room.members.split(",");
+        const members = parseMembers(room.members);
         return members.filter((member: string) => member !== socket.user.id)[0];
-    })
+    }).filter(Boolean)
 
     const prevChats = await prisma.user.findMany({
         where: { id: { in: partners } },
@@ -287,7 +302,10 @@ export const uploadFile = async (io: Server, socket: Socket, data: any) => {
         })
 
         // Send push notification to offline recipient
-        let to = room.members.split(",").filter((member: string) => member !== data.from)[0];
+        const fileMembers = parseMembers(room.members);
+        let to = fileMembers.filter((member: string) => member !== data.from)[0];
+
+        if (!to) return;
 
         let otherUser = await prisma.user.findUnique({
             where: { id: to },

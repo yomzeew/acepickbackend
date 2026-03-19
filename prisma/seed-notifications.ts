@@ -3,16 +3,16 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function seedNotifications() {
-  console.log('🌱 Starting notification seeding for client1.joseph.ibrahim@test.com...\n');
+  console.log('🌱 Starting notification seeding for john.client@test.com...\n');
 
   try {
     // Find the user by email
     const user = await prisma.user.findUnique({
-      where: { email: 'client1.joseph.ibrahim@test.com' }
+      where: { email: 'john.client@test.com' }
     });
 
     if (!user) {
-      console.error('❌ User client1.joseph.ibrahim@test.com not found in database');
+      console.error('❌ User john.client@test.com not found in database');
       console.log('Please make sure this user exists before running this seed script');
       return;
     }
