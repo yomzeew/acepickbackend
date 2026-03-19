@@ -27,57 +27,61 @@ const parseMembers = (members: string): string[] => {
 };
 
 export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage) => {
-    // Always use authenticated user id — never trust the client payload
-    const senderId = socket.user.id;
+    try {
+        // Always use authenticated user id — never trust the client payload
+        const senderId = socket.user.id;
 
-    let room = await prisma.chatRoom.findFirst({ where: { name: data.room } })
+        let room = await prisma.chatRoom.findFirst({ where: { name: data.room } })
 
-    if (!room) {
-        return
-    }
-
-    const message = await prisma.message.create({
-        data: {
-            text: encryptMessage(data.text),
-            from: senderId,
-            timestamp: new Date(),
-            chatroomId: room.id
+        if (!room) {
+            return
         }
-    })
 
-    const members = parseMembers(room.members);
-    let to = members.filter((member: string) => member !== senderId)[0];
-
-    if (!to) return;
-
-    let otherUser = await prisma.user.findUnique({
-        where: { id: to },
-        include: { onlineUser: true }
-    })
-
-    if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
-        let user = await prisma.user.findFirst({
-            where: { id: senderId },
-            include: { profile: true }
+        const message = await prisma.message.create({
+            data: {
+                text: encryptMessage(data.text),
+                from: senderId,
+                timestamp: new Date(),
+                chatroomId: room.id
+            }
         })
 
-        const senderName = `${user?.profile?.firstName} ${user?.profile?.lastName}`;
-        await NotificationService.create({
-            userId: to,
-            type: NotificationType.CHAT,
-            title: `${senderName} sent you a message`,
-            message: data.text,
-            data: { type: 'chat', roomName: room.name, senderId, senderName },
-        });
-    }
+        const members = parseMembers(room.members);
+        let to = members.filter((member: string) => member !== senderId)[0];
 
-    io.to(room.name).emit(Emit.RECV_MSG, {
-        from: senderId,
-        to,
-        text: data.text,
-        room: data.room,
-        timestamp: message.timestamp,
-    });
+        if (!to) return;
+
+        let otherUser = await prisma.user.findUnique({
+            where: { id: to },
+            include: { onlineUser: true }
+        })
+
+        if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
+            let user = await prisma.user.findFirst({
+                where: { id: senderId },
+                include: { profile: true }
+            })
+
+            const senderName = `${user?.profile?.firstName} ${user?.profile?.lastName}`;
+            await NotificationService.create({
+                userId: to,
+                type: NotificationType.CHAT,
+                title: `${senderName} sent you a message`,
+                message: data.text,
+                data: { type: 'chat', roomName: room.name, senderId, senderName },
+            });
+        }
+
+        io.to(room.name).emit(Emit.RECV_MSG, {
+            from: senderId,
+            to,
+            text: data.text,
+            room: data.room,
+            timestamp: message.timestamp,
+        });
+    } catch (error) {
+        console.error("sendMessage error:", error);
+    }
 }
 
 export const onConnect = async (socket: Socket) => {
@@ -134,127 +138,144 @@ export const onDisconnect = async (socket: Socket) => {
 }
 
 export const getContacts = async (io: Server, socket: Socket) => {
-    const user = socket.user;
+    try {
+        const user = socket.user;
 
-    if (!user) {
-        return
-    }
-
-    const contacts = await prisma.user.findMany({
-        where: {
-            NOT: { id: user.id },
-        },
-        select: {
-            id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
-            profile: {
-                include: {
-                    professional: { include: { profession: true } }
-                }
-            },
-            location: true,
+        if (!user) {
+            return
         }
-    })
 
-    socket.emit(Emit.ALL_CONTACTS, contacts);
+        const contacts = await prisma.user.findMany({
+            where: {
+                NOT: { id: user.id },
+            },
+            select: {
+                id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
+                profile: {
+                    include: {
+                        professional: { include: { profession: true } }
+                    }
+                },
+                location: true,
+            }
+        })
+
+        socket.emit(Emit.ALL_CONTACTS, contacts);
+    } catch (error) {
+        console.error("getContacts error:", error);
+        socket.emit(Emit.ALL_CONTACTS, []);
+    }
 }
 
 export const joinRoom = async (io: Server, socket: Socket, data: any) => {
+    try {
+        console.log("join room", data);
 
-    console.log("join room", data);
-
-    let room = await prisma.chatRoom.findFirst({
-        where: {
-            AND: [
-                { members: { contains: socket.user.id } },
-                { members: { contains: data.contactId } }
-            ]
-        }
-    })
-
-    if (!room) {
-        room = await prisma.chatRoom.create({
-            data: {
-                name: randomId(12),
-                members: `${socket.user.id},${data.contactId}`
+        let room = await prisma.chatRoom.findFirst({
+            where: {
+                AND: [
+                    { members: { contains: socket.user.id } },
+                    { members: { contains: data.contactId } }
+                ]
             }
         })
-    }
 
-    const existingRoom = io.of("/").adapter.rooms.get(room.name);
-
-    if (!existingRoom?.has(socket.id))
-        socket.join(room.name);
-
-    const onlineUser = await prisma.onlineUser.findFirst({
-        where: { userId: data.contactId }
-    })
-
-    if (onlineUser) {
-        const sid = onlineUser.socketId;
-
-        if (sid && !existingRoom?.has(sid)) {
-            const userSocket = io.sockets.sockets.get(sid);
-            userSocket?.join(room.name);
+        if (!room) {
+            room = await prisma.chatRoom.create({
+                data: {
+                    name: randomId(12),
+                    members: `${socket.user.id},${data.contactId}`
+                }
+            })
         }
+
+        const existingRoom = io.of("/").adapter.rooms.get(room.name);
+
+        if (!existingRoom?.has(socket.id))
+            socket.join(room.name);
+
+        const onlineUser = await prisma.onlineUser.findFirst({
+            where: { userId: data.contactId }
+        })
+
+        if (onlineUser) {
+            const sid = onlineUser.socketId;
+
+            if (sid && !existingRoom?.has(sid)) {
+                const userSocket = io.sockets.sockets.get(sid);
+                userSocket?.join(room.name);
+            }
+        }
+
+        socket.emit(Emit.JOINED_ROOM, room.name);
+
+        console.log("joined room", room.name);
+    } catch (error) {
+        console.error("joinRoom error:", error);
     }
-
-    socket.emit(Emit.JOINED_ROOM, room.name);
-
-    console.log("joined room", room.name);
 }
 
 export const getMsgs = async (io: Server, socket: Socket, data: any) => {
-    const chatroom = await prisma.chatRoom.findFirst({
-        where: { name: data.room },
-        include: { messages: true }
-    })
+    try {
+        const chatroom = await prisma.chatRoom.findFirst({
+            where: { name: data.room },
+            include: { messages: true }
+        })
 
-    if (!chatroom) return;
+        if (!chatroom) return;
 
-    const members = parseMembers(chatroom.members);
+        const members = parseMembers(chatroom.members);
 
-    // Sort by timestamp ascending so oldest messages come first
-    const sorted = [...chatroom.messages].sort(
-        (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+        // Sort by timestamp ascending so oldest messages come first
+        const sorted = [...chatroom.messages].sort(
+            (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
 
-    const normalizedMessages: any[] = sorted.map((msg: any) => ({
-        to: members.filter((member: string) => member !== msg.from)[0],
-        from: msg.from,
-        text: decryptMessage(msg.text),
-        room: data.room,
-        timestamp: msg.timestamp,
-    }));
+        const normalizedMessages: any[] = sorted.map((msg: any) => ({
+            to: members.filter((member: string) => member !== msg.from)[0],
+            from: msg.from,
+            text: decryptMessage(msg.text),
+            room: data.room,
+            timestamp: msg.timestamp,
+        }));
 
-    socket.emit(Emit.RECV_MSGs, normalizedMessages);
+        socket.emit(Emit.RECV_MSGs, normalizedMessages);
+    } catch (error) {
+        console.error("getMsgs error:", error);
+        socket.emit(Emit.RECV_MSGs, []);
+    }
 }
 
 export const getPrevChats = async (io: Server, socket: Socket, data: any) => {
+    try {
+        const chatrooms = await prisma.chatRoom.findMany({
+            where: { members: { contains: socket.user.id } }
+        });
 
-    const chatrooms = await prisma.chatRoom.findMany({
-        where: { members: { contains: socket.user.id } }
-    });
+        const partners = chatrooms.map((room: any) => {
+            const members = parseMembers(room.members);
+            return members.filter((member: string) => member !== socket.user.id)[0];
+        }).filter(Boolean)
 
-    const partners = chatrooms.map((room: any) => {
-        const members = parseMembers(room.members);
-        return members.filter((member: string) => member !== socket.user.id)[0];
-    }).filter(Boolean)
+        const prevChats = await prisma.user.findMany({
+            where: { id: { in: partners } },
+            select: {
+                id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
+                profile: {
+                    include: {
+                        professional: { include: { profession: true } }
+                    }
+                },
+                location: true,
+                onlineUser: true,
+            }
+        })
 
-    const prevChats = await prisma.user.findMany({
-        where: { id: { in: partners } },
-        select: {
-            id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
-            profile: {
-                include: {
-                    professional: { include: { profession: true } }
-                }
-            },
-            location: true,
-            onlineUser: true,
-        }
-    })
-
-    socket.emit(Emit.GOT_PREV_CHATS, prevChats);
+        socket.emit(Emit.GOT_PREV_CHATS, prevChats);
+    } catch (error) {
+        console.error("getPrevChats error:", error);
+        socket.emit(Emit.GOT_PREV_CHATS, []);
+    }
 }
 
 

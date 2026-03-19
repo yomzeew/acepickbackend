@@ -100,8 +100,8 @@ export const UserAccountInfo = async (req: Request, res: Response) => {
         };
 
         return successResponse(res, "Successful", result)
-    } catch (error) {
-        return errorResponse(res, "Failed", error)
+    } catch (error: any) {
+        return errorResponse(res, "Failed", { error: error?.message || "Unknown error" })
     }
 };
 
