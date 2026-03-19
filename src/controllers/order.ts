@@ -343,7 +343,7 @@ export const createOrder = async (req: Request, res: Response) => {
                 userId: id,
                 action: `${productTransaction.buyer.profile?.firstName} ${productTransaction.buyer.profile?.lastName} has created Order #${order.id}`,
                 type: 'Order created',
-                status: 'success' as any
+                status: 'act_success' as any
             }
         });
 
@@ -610,7 +610,7 @@ export const acceptOrder = async (req: Request, res: Response) => {
                 userId: id,
                 action: `${riderName} has accepted Order #${orderId}`,
                 type: 'Order accepted',
-                status: 'success' as any
+                status: 'act_success' as any
             }
         });
 
@@ -694,7 +694,7 @@ const riderStatusTransition = async (
                 userId: id,
                 action: `${riderName} — Order #${order.id} → ${toStatus}`,
                 type: activityType,
-                status: 'success' as any
+                status: 'act_success' as any
             }
         });
 
@@ -794,7 +794,7 @@ export const confirmPickup = async (req: Request, res: Response) => {
                 userId: id,
                 action: `Vendor confirmed pickup for Order #${order.id}`,
                 type: 'Order pickup confirmation',
-                status: 'success' as any
+                status: 'act_success' as any
             }
         });
 
@@ -1008,7 +1008,7 @@ export const confirmDelivery = async (req: Request, res: Response) => {
                 userId: productTransaction.buyerId,
                 action: `${productTransaction.buyer.profile?.firstName} ${productTransaction.buyer.profile?.lastName} has confirmed delivery of Order #${productTransaction.order?.id}`,
                 type: 'Order confirmation',
-                status: 'success' as any
+                status: 'act_success' as any
             }
         })
 
@@ -1135,7 +1135,7 @@ export const disputeOrder = async (req: Request, res: Response) => {
             userId: id,
             action: `${reporter?.profile?.firstName} has raised a dispute for product transaction #${productTransaction.id}`,
             type: 'Product Transaction dispute',
-            status: 'pending' as any
+            status: 'act_pending' as any
         }
     });
 
@@ -1178,7 +1178,7 @@ export const resolveDispute = async (req: Request, res: Response) => {
             userId: id,
             action: `Dispute #${dispute.id} has been resolved by admin`,
             type: 'Dispute resolution',
-            status: 'success' as any
+            status: 'act_success' as any
         }
     });
 
