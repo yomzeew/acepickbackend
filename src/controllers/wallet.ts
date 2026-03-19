@@ -11,6 +11,7 @@ import { NotificationType } from "../utils/enum";
 import z from "zod";
 import { LedgerService } from "../services/ledgerService";
 import { notifyNearbyRiders } from "./order";
+import { onJobStatusUpdate } from "../hooks/jobHook";
 
 export const createWallet = async (req: Request, res: Response) => {
     const { id } = req.user;
@@ -186,6 +187,8 @@ export const debitWallet = async (req: Request, res: Response) => {
             message: `Your job "${job.title}" has been paid`,
             data: { jobId: job.id },
         });
+
+        onJobStatusUpdate({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
 
         return successResponse(res, 'success', transaction)
 

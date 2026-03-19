@@ -48,6 +48,7 @@ async function main() {
     console.log('✅ Cleaned existing data');
 
     const hashedPassword = await bcrypt.hash(PASSWORD, 10);
+    const hashedPin = await bcrypt.hash('1234', 10);
 
     // ──────────────────── SECTORS & PROFESSIONS ────────────────────
 
@@ -164,7 +165,7 @@ async function main() {
         data: { userId: client1.id, address: '15 Broad Street', lga: 'Lagos Island', state: 'Lagos', latitude: 6.4541, longitude: 3.4085 }
     });
     const client1Wallet = await prisma.wallet.create({
-        data: { userId: client1.id, previousBalance: 50000, currentBalance: 120000 }
+        data: { userId: client1.id, previousBalance: 50000, currentBalance: 120000, pin: hashedPin }
     });
 
     // Client 2
@@ -184,7 +185,7 @@ async function main() {
         data: { userId: client2.id, address: '22 Allen Avenue', lga: 'Ikeja', state: 'Lagos', latitude: 6.6018, longitude: 3.3515 }
     });
     await prisma.wallet.create({
-        data: { userId: client2.id, previousBalance: 30000, currentBalance: 85000 }
+        data: { userId: client2.id, previousBalance: 30000, currentBalance: 85000, pin: hashedPin }
     });
 
     // Professional 1 (Web Developer)
@@ -204,7 +205,7 @@ async function main() {
         data: { userId: pro1.id, address: '8 Admiralty Way', lga: 'Eti-Osa', state: 'Lagos', latitude: 6.4281, longitude: 3.4219 }
     });
     const pro1Wallet = await prisma.wallet.create({
-        data: { userId: pro1.id, previousBalance: 200000, currentBalance: 350000 }
+        data: { userId: pro1.id, previousBalance: 200000, currentBalance: 350000, pin: hashedPin }
     });
     const professional1 = await prisma.professional.create({
         data: { profileId: pro1Profile.id, professionId: profWebDev.id, intro: 'Experienced full-stack web developer with 5 years of expertise.', chargeFrom: 50000, yearsOfExp: 5, language: 'English', totalEarning: 750000, completedAmount: 600000 }
@@ -227,7 +228,7 @@ async function main() {
         data: { userId: pro2.id, address: '45 Toyin Street', lga: 'Ikeja', state: 'Lagos', latitude: 6.6010, longitude: 3.3580 }
     });
     await prisma.wallet.create({
-        data: { userId: pro2.id, previousBalance: 100000, currentBalance: 180000 }
+        data: { userId: pro2.id, previousBalance: 100000, currentBalance: 180000, pin: hashedPin }
     });
     const professional2 = await prisma.professional.create({
         data: { profileId: pro2Profile.id, professionId: profPlumber.id, intro: 'Expert plumber with over 8 years experience in residential and commercial plumbing.', chargeFrom: 15000, yearsOfExp: 8, language: 'English', totalEarning: 400000, completedAmount: 350000 }
@@ -250,7 +251,7 @@ async function main() {
         data: { userId: pro3.id, address: '12 Opebi Road', lga: 'Ikeja', state: 'Lagos', latitude: 6.5892, longitude: 3.3598 }
     });
     await prisma.wallet.create({
-        data: { userId: pro3.id, previousBalance: 60000, currentBalance: 95000 }
+        data: { userId: pro3.id, previousBalance: 60000, currentBalance: 95000, pin: hashedPin }
     });
     await prisma.professional.create({
         data: { profileId: pro3Profile.id, professionId: profElectrician.id, intro: 'Certified electrician specializing in solar installations and home wiring.', chargeFrom: 20000, yearsOfExp: 6, language: 'English', totalEarning: 250000, completedAmount: 200000 }
@@ -273,7 +274,7 @@ async function main() {
         data: { userId: riderUser.id, address: '5 Surulere Street', lga: 'Surulere', state: 'Lagos', latitude: 6.5059, longitude: 3.3601 }
     });
     await prisma.wallet.create({
-        data: { userId: riderUser.id, previousBalance: 20000, currentBalance: 45000 }
+        data: { userId: riderUser.id, previousBalance: 20000, currentBalance: 45000, pin: hashedPin }
     });
     await prisma.rider.create({
         data: { userId: riderUser.id, vehicleType: 'bike', licenseNumber: 'LG-2024-RD-001', status: 'available' }
@@ -296,7 +297,7 @@ async function main() {
         data: { userId: corpUser.id, address: '100 Adeola Odeku', lga: 'Eti-Osa', state: 'Lagos', latitude: 6.4310, longitude: 3.4250 }
     });
     await prisma.wallet.create({
-        data: { userId: corpUser.id, previousBalance: 500000, currentBalance: 1200000 }
+        data: { userId: corpUser.id, previousBalance: 500000, currentBalance: 1200000, pin: hashedPin }
     });
     const cooperation = await prisma.cooperation.create({
         data: { nameOfOrg: 'Acme Corporation', phone: '08077777777', regNum: 'RC-123456', noOfEmployees: '50', professionId: profWebDev.id, profileId: corpProfile.id }
@@ -357,33 +358,34 @@ async function main() {
     console.log('✅ Education, Experience, Certifications, Portfolios created');
 
     // ──────────────────── JOBS (every lifecycle stage) ────────────────────
+    // All primary stages seeded between john.client (client1) ↔ emeka.pro (pro1)
 
     // ── Stage 1: PENDING – brand new, professional hasn't responded yet ──
     const jobPendingNew = await prisma.job.create({
         data: {
-            title: 'Electrical wiring for new apartment',
-            description: 'Complete electrical wiring for a 3-bedroom apartment including sockets and switches.',
-            clientId: client2.id,
-            professionalId: pro3.id,
+            title: 'Landing page redesign',
+            description: 'Redesign my business landing page with modern UI and responsive layout.',
+            clientId: client1.id,
+            professionalId: pro1.id,
             status: 'PENDING',
             accepted: false,
-            mode: 'PHYSICAL',
+            mode: 'VIRTUAL',
             state: 'Lagos',
-            lga: 'Ikeja',
-            fullAddress: '22 Allen Avenue, Ikeja',
+            lga: 'Lagos Island',
+            fullAddress: '15 Broad Street, Lagos Island',
         }
     });
 
     // ── Stage 2: PENDING + accepted – professional accepted, invoice NOT yet raised ──
     const jobAcceptedNoInvoice = await prisma.job.create({
         data: {
-            title: 'Fix bathroom tap',
-            description: 'Bathroom tap is dripping non-stop. Needs replacement.',
+            title: 'API integration for mobile app',
+            description: 'Need REST API integration for payment gateway and user auth in my mobile app.',
             clientId: client1.id,
-            professionalId: pro2.id,
+            professionalId: pro1.id,
             status: 'PENDING',
             accepted: true,
-            mode: 'PHYSICAL',
+            mode: 'VIRTUAL',
             state: 'Lagos',
             lga: 'Lagos Island',
             fullAddress: '15 Broad Street, Lagos Island',
@@ -393,20 +395,20 @@ async function main() {
     // ── Stage 3: PENDING + accepted + invoice raised – awaiting payment ──
     const jobInvoiced = await prisma.job.create({
         data: {
-            title: 'Kitchen plumbing overhaul',
-            description: 'Replace all kitchen pipes, install new mixer tap and dishwasher hookup.',
-            clientId: client2.id,
-            professionalId: pro2.id,
+            title: 'E-commerce website development',
+            description: 'Build a full e-commerce site with product listing, cart, checkout and admin dashboard.',
+            clientId: client1.id,
+            professionalId: pro1.id,
             status: 'PENDING',
             accepted: true,
-            mode: 'PHYSICAL',
+            mode: 'VIRTUAL',
             state: 'Lagos',
-            lga: 'Ikeja',
-            fullAddress: '22 Allen Avenue, Ikeja',
-            workmanship: 45000,
-            materialsCost: 18500,
+            lga: 'Lagos Island',
+            fullAddress: '15 Broad Street, Lagos Island',
+            workmanship: 200000,
+            materialsCost: 25000,
             isMaterial: true,
-            durationUnit: 'days',
+            durationUnit: 'weeks',
             durationValue: 3,
         }
     });
@@ -433,21 +435,21 @@ async function main() {
     // ── Stage 5: COMPLETED – work done, awaiting client approval ──
     const jobCompleted = await prisma.job.create({
         data: {
-            title: 'Solar panel installation',
-            description: 'Install 2kW solar system on rooftop with inverter and battery bank.',
+            title: 'Portfolio website',
+            description: 'Build a personal portfolio site with blog, projects showcase and contact form.',
             clientId: client1.id,
-            professionalId: pro3.id,
+            professionalId: pro1.id,
             status: 'COMPLETED',
             accepted: true,
-            mode: 'PHYSICAL',
+            mode: 'VIRTUAL',
             state: 'Lagos',
-            lga: 'Eti-Osa',
-            fullAddress: '8 Admiralty Way, Lekki',
-            workmanship: 120000,
-            materialsCost: 380000,
+            lga: 'Lagos Island',
+            fullAddress: '15 Broad Street, Lagos Island',
+            workmanship: 80000,
+            materialsCost: 5000,
             isMaterial: true,
-            durationUnit: 'days',
-            durationValue: 5,
+            durationUnit: 'weeks',
+            durationValue: 2,
             payStatus: 'paid',
             paymentRef: 'PAY-JOB-COMPLETED-001',
         }
@@ -456,22 +458,22 @@ async function main() {
     // ── Stage 6a: APPROVED – happy path, money released ──
     const jobApproved = await prisma.job.create({
         data: {
-            title: 'Fix kitchen sink leakage',
-            description: 'The kitchen sink has been leaking for 3 days. Need urgent repair.',
+            title: 'Dashboard UI development',
+            description: 'Develop an analytics dashboard with charts, tables and export functionality.',
             clientId: client1.id,
-            professionalId: pro2.id,
+            professionalId: pro1.id,
             status: 'APPROVED',
             accepted: true,
             approved: true,
-            mode: 'PHYSICAL',
+            mode: 'VIRTUAL',
             state: 'Lagos',
             lga: 'Lagos Island',
             fullAddress: '15 Broad Street, Lagos Island',
-            workmanship: 20000,
-            materialsCost: 5000,
+            workmanship: 120000,
+            materialsCost: 10000,
             isMaterial: true,
-            durationUnit: 'hours',
-            durationValue: 4,
+            durationUnit: 'weeks',
+            durationValue: 2,
             payStatus: 'released',
             paymentRef: 'PAY-JOB-APPROVED-001',
         }
@@ -480,27 +482,90 @@ async function main() {
     // ── Stage 6b: DISPUTED – client raised dispute after completion ──
     const jobDisputed = await prisma.job.create({
         data: {
-            title: 'Bathroom plumbing repair',
-            description: 'Replace old bathroom pipes and fix shower head.',
-            clientId: client2.id,
-            professionalId: pro2.id,
+            title: 'Blog platform development',
+            description: 'Build a custom blog with CMS, SEO features and newsletter integration.',
+            clientId: client1.id,
+            professionalId: pro1.id,
             status: 'DISPUTED',
             accepted: true,
-            mode: 'PHYSICAL',
+            mode: 'VIRTUAL',
             state: 'Lagos',
-            lga: 'Ikeja',
-            fullAddress: '22 Allen Avenue, Ikeja',
-            workmanship: 30000,
-            materialsCost: 5000,
+            lga: 'Lagos Island',
+            fullAddress: '15 Broad Street, Lagos Island',
+            workmanship: 95000,
+            materialsCost: 8000,
             isMaterial: true,
-            durationUnit: 'hours',
-            durationValue: 6,
+            durationUnit: 'weeks',
+            durationValue: 2,
             payStatus: 'paid',
             paymentRef: 'PAY-JOB-DISPUTED-001',
         }
     });
 
-    // ── Stage 7: ONGOING (corporate) – large virtual job in progress ──
+    // ── Stage 7: CANCELLED – client cancelled before acceptance ──
+    const jobCancelled = await prisma.job.create({
+        data: {
+            title: 'SEO optimization project',
+            description: 'Optimize website for search engines, improve page speed and meta tags.',
+            clientId: client1.id,
+            professionalId: pro1.id,
+            status: 'CANCELLED',
+            accepted: false,
+            mode: 'VIRTUAL',
+            state: 'Lagos',
+            lga: 'Lagos Island',
+            fullAddress: '15 Broad Street, Lagos Island',
+        }
+    });
+
+    // ── Stage 8: REJECTED – professional declined the job ──
+    const jobDeclined = await prisma.job.create({
+        data: {
+            title: 'Chatbot integration',
+            description: 'Integrate AI chatbot into existing website for customer support.',
+            clientId: client1.id,
+            professionalId: pro1.id,
+            status: 'REJECTED',
+            accepted: false,
+            mode: 'VIRTUAL',
+            state: 'Lagos',
+            lga: 'Lagos Island',
+            fullAddress: '15 Broad Street, Lagos Island',
+        }
+    });
+
+    // ── Extra jobs with other users for variety ──
+    const jobExtraPlumber = await prisma.job.create({
+        data: {
+            title: 'Fix bathroom tap',
+            description: 'Bathroom tap is dripping non-stop. Needs replacement.',
+            clientId: client1.id,
+            professionalId: pro2.id,
+            status: 'PENDING',
+            accepted: true,
+            mode: 'PHYSICAL',
+            state: 'Lagos',
+            lga: 'Lagos Island',
+            fullAddress: '15 Broad Street, Lagos Island',
+        }
+    });
+
+    const jobExtraElectrician = await prisma.job.create({
+        data: {
+            title: 'Solar panel installation',
+            description: 'Install 2kW solar system on rooftop with inverter and battery bank.',
+            clientId: client2.id,
+            professionalId: pro3.id,
+            status: 'PENDING',
+            accepted: false,
+            mode: 'PHYSICAL',
+            state: 'Lagos',
+            lga: 'Ikeja',
+            fullAddress: '22 Allen Avenue, Ikeja',
+        }
+    });
+
+    // ── Stage 7b: ONGOING (corporate) – large virtual job in progress ──
     const jobCorpOngoing = await prisma.job.create({
         data: {
             title: 'Mobile app development',
@@ -518,46 +583,43 @@ async function main() {
         }
     });
 
-    console.log('✅ Jobs created (8 jobs across every lifecycle stage)');
+    console.log('✅ Jobs created (11 jobs across every lifecycle stage)');
 
     // ──────────────────── MATERIALS ────────────────────
 
-    // Materials for the invoiced job (stage 3)
+    // Materials for the invoiced job (stage 3 – e-commerce)
     await prisma.material.create({
-        data: { jobId: jobInvoiced.id, description: 'PVC Pipe 1.5 inch', quantity: 5, unit: 'pieces', price: 1500, subTotal: 7500 }
+        data: { jobId: jobInvoiced.id, description: 'Domain name (.com)', quantity: 1, unit: 'pieces', price: 8000, subTotal: 8000 }
     });
     await prisma.material.create({
-        data: { jobId: jobInvoiced.id, description: 'Mixer Tap Chrome', quantity: 1, unit: 'pieces', price: 8000, subTotal: 8000 }
+        data: { jobId: jobInvoiced.id, description: 'Hosting plan (1 year)', quantity: 1, unit: 'pieces', price: 12000, subTotal: 12000 }
     });
     await prisma.material.create({
-        data: { jobId: jobInvoiced.id, description: 'Teflon Tape', quantity: 3, unit: 'rolls', price: 1000, subTotal: 3000 }
-    });
-
-    // Materials for completed solar job (stage 5)
-    await prisma.material.create({
-        data: { jobId: jobCompleted.id, description: '300W Solar Panel', quantity: 7, unit: 'pieces', price: 45000, subTotal: 315000 }
-    });
-    await prisma.material.create({
-        data: { jobId: jobCompleted.id, description: '5kVA Inverter', quantity: 1, unit: 'pieces', price: 55000, subTotal: 55000 }
-    });
-    await prisma.material.create({
-        data: { jobId: jobCompleted.id, description: '200AH Battery', quantity: 2, unit: 'pieces', price: 5000, subTotal: 10000 }
+        data: { jobId: jobInvoiced.id, description: 'SSL Certificate', quantity: 1, unit: 'pieces', price: 5000, subTotal: 5000 }
     });
 
-    // Materials for approved job (stage 6a)
+    // Materials for completed portfolio job (stage 5)
     await prisma.material.create({
-        data: { jobId: jobApproved.id, description: 'PVC Pipe 2 inch', quantity: 3, unit: 'pieces', price: 1200, subTotal: 3600 }
+        data: { jobId: jobCompleted.id, description: 'Premium template license', quantity: 1, unit: 'pieces', price: 3000, subTotal: 3000 }
     });
     await prisma.material.create({
-        data: { jobId: jobApproved.id, description: 'Plumber Sealant', quantity: 1, unit: 'tube', price: 1400, subTotal: 1400 }
+        data: { jobId: jobCompleted.id, description: 'Stock images pack', quantity: 1, unit: 'pieces', price: 2000, subTotal: 2000 }
     });
 
-    // Materials for disputed job (stage 6b)
+    // Materials for approved dashboard job (stage 6a)
     await prisma.material.create({
-        data: { jobId: jobDisputed.id, description: 'Bathroom Pipe Set', quantity: 2, unit: 'pieces', price: 2000, subTotal: 4000 }
+        data: { jobId: jobApproved.id, description: 'Chart library license', quantity: 1, unit: 'pieces', price: 5000, subTotal: 5000 }
     });
     await prisma.material.create({
-        data: { jobId: jobDisputed.id, description: 'Shower Head', quantity: 1, unit: 'pieces', price: 1000, subTotal: 1000 }
+        data: { jobId: jobApproved.id, description: 'Cloud hosting setup', quantity: 1, unit: 'pieces', price: 5000, subTotal: 5000 }
+    });
+
+    // Materials for disputed blog job (stage 6b)
+    await prisma.material.create({
+        data: { jobId: jobDisputed.id, description: 'CMS plugin license', quantity: 1, unit: 'pieces', price: 4000, subTotal: 4000 }
+    });
+    await prisma.material.create({
+        data: { jobId: jobDisputed.id, description: 'Email service integration', quantity: 1, unit: 'pieces', price: 4000, subTotal: 4000 }
     });
 
     console.log('✅ Materials created');
@@ -566,11 +628,11 @@ async function main() {
 
     await prisma.dispute.create({
         data: {
-            reason: 'Incomplete work',
-            description: 'The shower head was not properly fitted and is still leaking. Pipes are making noise when water flows.',
+            reason: 'Incomplete features',
+            description: 'The newsletter integration was not implemented and the SEO features are missing. Blog post editor has formatting bugs.',
             jobId: jobDisputed.id,
-            reporterId: client2.id,
-            partnerId: pro2.id,
+            reporterId: client1.id,
+            partnerId: pro1.id,
         }
     });
 
@@ -672,10 +734,10 @@ async function main() {
 
     // ──────────────────── TRANSACTIONS & LEDGER ENTRIES ────────────────────
 
-    // Client payment for approved job (kitchen sink) – into escrow
+    // Client payment for approved dashboard job – into escrow
     const txApprovedPay = await prisma.transaction.create({
         data: {
-            amount: 25000,
+            amount: 130000,
             type: 'debit',
             status: 'success',
             channel: 'paystack',
@@ -687,18 +749,17 @@ async function main() {
             userId: client1.id,
         }
     });
-    // Ledger: payment gateway → platform escrow
     await prisma.ledgerEntry.create({
-        data: { transactionId: txApprovedPay.id, userId: client1.id, amount: 25000, type: 'debit', account: 'payment_gateway', category: 'ec_job' }
+        data: { transactionId: txApprovedPay.id, userId: client1.id, amount: 130000, type: 'debit', account: 'payment_gateway', category: 'job' }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txApprovedPay.id, userId: null, amount: 25000, type: 'credit', account: 'platform_escrow', category: 'ec_job' }
+        data: { transactionId: txApprovedPay.id, userId: null, amount: 130000, type: 'credit', account: 'platform_escrow', category: 'job' }
     });
 
     // Professional payout for approved job – escrow → professional wallet (minus 5% commission)
     const txApprovedPayout = await prisma.transaction.create({
         data: {
-            amount: 24000, // (20000 workmanship + 5000 materials) - (20000 * 0.05 commission) = 24000
+            amount: 124000, // 130000 - (120000 * 0.05 commission) = 124000
             type: 'credit',
             status: 'success',
             currency: 'NGN',
@@ -706,18 +767,17 @@ async function main() {
             description: 'wallet deposit',
             reference: 'TXN-EARN-APPROVED-001',
             jobId: jobApproved.id,
-            userId: pro2.id,
+            userId: pro1.id,
         }
     });
-    // Ledger: escrow → professional wallet + platform revenue (commission)
     await prisma.ledgerEntry.create({
-        data: { transactionId: txApprovedPayout.id, userId: pro2.id, amount: 25000, type: 'debit', account: 'platform_escrow', category: 'ec_job' }
+        data: { transactionId: txApprovedPayout.id, userId: pro1.id, amount: 130000, type: 'debit', account: 'platform_escrow', category: 'job' }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txApprovedPayout.id, userId: pro2.id, amount: 24000, type: 'credit', account: 'professional_wallet', category: 'ec_job' }
+        data: { transactionId: txApprovedPayout.id, userId: pro1.id, amount: 124000, type: 'credit', account: 'professional_wallet', category: 'job' }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txApprovedPayout.id, userId: null, amount: 1000, type: 'credit', account: 'platform_revenue', category: 'ec_job' }
+        data: { transactionId: txApprovedPayout.id, userId: null, amount: 6000, type: 'credit', account: 'platform_revenue', category: 'job' }
     });
 
     // Client payment for ongoing website job – into escrow
@@ -736,16 +796,16 @@ async function main() {
         }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txOngoingPay.id, userId: client1.id, amount: 150000, type: 'debit', account: 'payment_gateway', category: 'ec_job' }
+        data: { transactionId: txOngoingPay.id, userId: client1.id, amount: 150000, type: 'debit', account: 'payment_gateway', category: 'job' }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txOngoingPay.id, userId: null, amount: 150000, type: 'credit', account: 'platform_escrow', category: 'ec_job' }
+        data: { transactionId: txOngoingPay.id, userId: null, amount: 150000, type: 'credit', account: 'platform_escrow', category: 'job' }
     });
 
-    // Client payment for completed solar job – into escrow
+    // Client payment for completed portfolio job – into escrow
     const txCompletedPay = await prisma.transaction.create({
         data: {
-            amount: 500000,
+            amount: 85000,
             type: 'debit',
             status: 'success',
             channel: 'paystack',
@@ -758,16 +818,16 @@ async function main() {
         }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txCompletedPay.id, userId: client1.id, amount: 500000, type: 'debit', account: 'payment_gateway', category: 'ec_job' }
+        data: { transactionId: txCompletedPay.id, userId: client1.id, amount: 85000, type: 'debit', account: 'payment_gateway', category: 'job' }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txCompletedPay.id, userId: null, amount: 500000, type: 'credit', account: 'platform_escrow', category: 'ec_job' }
+        data: { transactionId: txCompletedPay.id, userId: null, amount: 85000, type: 'credit', account: 'platform_escrow', category: 'job' }
     });
 
-    // Client payment for disputed bathroom job – into escrow (still held)
+    // Client payment for disputed blog job – into escrow (still held)
     const txDisputedPay = await prisma.transaction.create({
         data: {
-            amount: 35000,
+            amount: 103000,
             type: 'debit',
             status: 'success',
             channel: 'wallet',
@@ -776,14 +836,14 @@ async function main() {
             description: 'job wallet payment',
             reference: 'TXN-JOB-DISPUTED-001',
             jobId: jobDisputed.id,
-            userId: client2.id,
+            userId: client1.id,
         }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txDisputedPay.id, userId: client2.id, amount: 35000, type: 'debit', account: 'user_wallet', category: 'ec_job' }
+        data: { transactionId: txDisputedPay.id, userId: client1.id, amount: 103000, type: 'debit', account: 'user_wallet', category: 'job' }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txDisputedPay.id, userId: null, amount: 35000, type: 'credit', account: 'platform_escrow', category: 'ec_job' }
+        data: { transactionId: txDisputedPay.id, userId: null, amount: 103000, type: 'credit', account: 'platform_escrow', category: 'job' }
     });
 
     // Corporate payment for mobile app job – into escrow
@@ -802,10 +862,10 @@ async function main() {
         }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txCorpPay.id, userId: corpUser.id, amount: 500000, type: 'debit', account: 'payment_gateway', category: 'ec_job' }
+        data: { transactionId: txCorpPay.id, userId: corpUser.id, amount: 500000, type: 'debit', account: 'payment_gateway', category: 'job' }
     });
     await prisma.ledgerEntry.create({
-        data: { transactionId: txCorpPay.id, userId: null, amount: 500000, type: 'credit', account: 'platform_escrow', category: 'ec_job' }
+        data: { transactionId: txCorpPay.id, userId: null, amount: 500000, type: 'credit', account: 'platform_escrow', category: 'job' }
     });
 
     // Product purchase transaction
@@ -829,17 +889,17 @@ async function main() {
     // ──────────────────── REVIEWS & RATINGS ────────────────────
 
     await prisma.review.create({
-        data: { text: 'Excellent plumbing work! Fixed the leak quickly and professionally.', professionalUserId: pro2.id, clientUserId: client1.id, jobId: jobApproved.id }
+        data: { text: 'Outstanding dashboard work! Clean design with fast performance. Highly recommend.', professionalUserId: pro1.id, clientUserId: client1.id, jobId: jobApproved.id }
     });
     await prisma.review.create({
-        data: { text: 'Great web developer, very responsive and skilled.', professionalUserId: pro1.id, clientUserId: client1.id, jobId: jobOngoing.id }
+        data: { text: 'Great web developer, very responsive and skilled. Website is coming along nicely.', professionalUserId: pro1.id, clientUserId: client1.id, jobId: jobOngoing.id }
     });
 
     await prisma.rating.create({
-        data: { value: 5, professionalUserId: pro2.id, clientUserId: client1.id, jobId: jobApproved.id }
+        data: { value: 5, professionalUserId: pro1.id, clientUserId: client1.id, jobId: jobApproved.id }
     });
     await prisma.rating.create({
-        data: { value: 5, professionalUserId: pro1.id, clientUserId: client1.id, jobId: jobOngoing.id }
+        data: { value: 4, professionalUserId: pro1.id, clientUserId: client1.id, jobId: jobOngoing.id }
     });
 
     console.log('✅ Reviews & Ratings created');
@@ -853,16 +913,31 @@ async function main() {
         data: { userId: pro1.id, action: 'Emeka Obi registered as a professional', type: 'New User', status: 'act_success' }
     });
     await prisma.activity.create({
-        data: { userId: client1.id, action: `John Adeyemi created Job #${jobApproved.id} - Fix kitchen sink`, type: 'Job Created', status: 'act_success' }
+        data: { userId: client1.id, action: `John Adeyemi created Job #${jobPendingNew.id} - Landing page redesign`, type: 'Job Created', status: 'act_success' }
     });
     await prisma.activity.create({
-        data: { userId: pro2.id, action: `Bola Akinwale completed Job #${jobApproved.id} - Fix kitchen sink`, type: 'Job Completion', status: 'act_success' }
+        data: { userId: pro1.id, action: `Emeka Obi accepted Job #${jobAcceptedNoInvoice.id} - API integration`, type: 'Job Accepted', status: 'act_success' }
     });
     await prisma.activity.create({
-        data: { userId: client1.id, action: `John Adeyemi approved Job #${jobApproved.id} - Fix kitchen sink`, type: 'Job Approval', status: 'act_success' }
+        data: { userId: pro1.id, action: `Emeka Obi created invoice for Job #${jobInvoiced.id} - E-commerce website`, type: 'Invoice Created', status: 'act_success' }
     });
     await prisma.activity.create({
-        data: { userId: client2.id, action: `Sarah Okafor disputed Job #${jobDisputed.id} - Bathroom plumbing repair`, type: 'Dispute', status: 'act_success' }
+        data: { userId: client1.id, action: `John Adeyemi paid for Job #${jobOngoing.id} - Build company website`, type: 'Job Payment', status: 'act_success' }
+    });
+    await prisma.activity.create({
+        data: { userId: pro1.id, action: `Emeka Obi completed Job #${jobCompleted.id} - Portfolio website`, type: 'Job Completion', status: 'act_success' }
+    });
+    await prisma.activity.create({
+        data: { userId: client1.id, action: `John Adeyemi approved Job #${jobApproved.id} - Dashboard UI`, type: 'Job Approval', status: 'act_success' }
+    });
+    await prisma.activity.create({
+        data: { userId: client1.id, action: `John Adeyemi disputed Job #${jobDisputed.id} - Blog platform`, type: 'Dispute', status: 'act_success' }
+    });
+    await prisma.activity.create({
+        data: { userId: client1.id, action: `John Adeyemi cancelled Job #${jobCancelled.id} - SEO optimization`, type: 'Job Cancelled', status: 'act_success' }
+    });
+    await prisma.activity.create({
+        data: { userId: pro1.id, action: `Emeka Obi rejected Job #${jobDeclined.id} - Chatbot integration`, type: 'Job Rejected', status: 'act_success' }
     });
 
     console.log('✅ Activities created');
@@ -892,17 +967,24 @@ async function main() {
     console.log('  Corporate:      admin@acmecorp.com');
     console.log('  Admin:          admin@acepick.com');
     console.log('─'.repeat(60));
-    console.log('\n📦 Seeded Jobs (lifecycle stages):');
-    console.log('─'.repeat(60));
-    console.log(`  #${jobPendingNew.id}       PENDING (new, not accepted)`);
-    console.log(`  #${jobAcceptedNoInvoice.id}       PENDING (accepted, no invoice)`);
-    console.log(`  #${jobInvoiced.id}       PENDING (accepted + invoiced, awaiting payment)`);
-    console.log(`  #${jobOngoing.id}       ONGOING (paid, work in progress)`);
-    console.log(`  #${jobCompleted.id}       COMPLETED (awaiting client approval)`);
-    console.log(`  #${jobApproved.id}       APPROVED (money released to professional)`);
-    console.log(`  #${jobDisputed.id}       DISPUTED (client raised dispute)`);
-    console.log(`  #${jobCorpOngoing.id}       ONGOING (corporate, large virtual job)`);
-    console.log('─'.repeat(60));
+    console.log('\n📦 Seeded Jobs — john.client ↔ emeka.pro (all lifecycle stages):');
+    console.log('─'.repeat(65));
+    console.log(`  #${jobPendingNew.id}  PENDING       (new, not accepted)`);
+    console.log(`  #${jobAcceptedNoInvoice.id}  PENDING       (accepted, no invoice)`);
+    console.log(`  #${jobInvoiced.id}  PENDING       (accepted + invoiced, awaiting payment)`);
+    console.log(`  #${jobOngoing.id}  ONGOING       (paid, work in progress)`);
+    console.log(`  #${jobCompleted.id}  COMPLETED     (awaiting client approval)`);
+    console.log(`  #${jobApproved.id}  APPROVED      (money released)`);
+    console.log(`  #${jobDisputed.id}  DISPUTED      (client raised dispute)`);
+    console.log(`  #${jobCancelled.id}  CANCELLED     (client cancelled)`);
+    console.log(`  #${jobDeclined.id}  REJECTED      (professional declined)`);
+    console.log('─'.repeat(65));
+    console.log('\n📦 Extra jobs (other user pairs):');
+    console.log('─'.repeat(65));
+    console.log(`  #${jobExtraPlumber.id}  PENDING   john.client ↔ bola.pro (Plumber)`);
+    console.log(`  #${jobExtraElectrician.id}  PENDING   sarah.client ↔ tunde.pro (Electrician)`);
+    console.log(`  #${jobCorpOngoing.id}  ONGOING   admin@acmecorp ↔ emeka.pro (Corporate)`);
+    console.log('─'.repeat(65));
 }
 
 main()

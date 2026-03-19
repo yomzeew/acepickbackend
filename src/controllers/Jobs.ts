@@ -13,6 +13,7 @@ import { getIO } from '../chat';
 import { Emit } from "../utils/events";
 import { LedgerService } from "../services/ledgerService";
 import { CommissionService } from "../services/CommissionService";
+import { onJobStatusUpdate, onJobCreate } from "../hooks/jobHook";
 
 export const testApi = async (req: Request, res: Response) => {
     return successResponse(res, "success", "Your Api is working!")
@@ -243,6 +244,8 @@ export const createJobOrder = async (req: Request, res: Response) => {
         }
     })
 
+    onJobCreate({ clientId: id, professionalId: validatedData.professionalId }).catch(console.error);
+
     return successResponse(res, "Successful", { jobResponse: job, emailSendId: emailResponse.success });
 }
 
@@ -359,6 +362,8 @@ export const cancelJob = async (req: Request, res: Response) => {
             io.to(onlineUser.socketId).emit(Emit.JOB_CANCELLED, { text: 'Your job has been cancelled by client', data: job });
         }
 
+        onJobStatusUpdate({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
+
         return successResponse(res, 'success', "Job cancelled successfully")
 
     } catch (error) {
@@ -436,6 +441,8 @@ export const respondToJob = async (req: Request, res: Response) => {
         if (onlineUser?.isOnline) {
             io.to(onlineUser.socketId).emit(Emit.JOB_RESPONSE, { text: `$Your Job has been ${accepted ? 'accepted' : 'rejected'}`, data: job });
         }
+
+        onJobStatusUpdate({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
 
         return successResponse(res, 'success', { message: 'Job respsonse updated', emailSendstatus: Boolean(emailResponse.messageId) })
     } catch (error) {
@@ -737,6 +744,8 @@ export const completeJob = async (req: Request, res: Response) => {
             }
         })
 
+        onJobStatusUpdate({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
+
         return successResponse(res, 'success', { message: 'Job completed sucessfully', emailSendStatus: emailResponse.success })
     } catch (error: any) {
         return errorResponse(res, 'error', error.message)
@@ -875,6 +884,8 @@ export const approveJob = async (req: Request, res: Response) => {
             }
         })
 
+        onJobStatusUpdate({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
+
         return successResponse(res, 'success', { message: 'Job approved sucessfully' })
     } catch (error: any) {
         return errorResponse(res, 'error', error.message)
@@ -962,6 +973,8 @@ export const disputeJob = async (req: Request, res: Response) => {
                 status: ActivityStatus.ACT_SUCCESS
             }
         })
+
+        onJobStatusUpdate({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
 
         return successResponse(res, 'success', { dispute, emailSendStatus: emailResponse.success })
     } catch (error: any) {

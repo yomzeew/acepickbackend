@@ -87,6 +87,156 @@ const notifyRidersRequestClosed = async (orderId: number, assignedRiderId: strin
     }
 };
 
+// ─────────────── Retry expired order ───────────────
+export const retryExpiredOrder = async (req: Request, res: Response) => {
+    try {
+        const { orderId } = req.params;
+        const userId = req.user.id;
+
+        const order = await prisma.order.findFirst({
+            where: {
+                id: Number(orderId),
+                status: OrderStatus.EXPIRED as any
+            },
+            include: {
+                productTransaction: {
+                    include: {
+                        product: true,
+                        buyer: { select: { id: true } }
+                    }
+                }
+            }
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Expired order not found' });
+        }
+
+        if (order.productTransaction.buyerId !== userId) {
+            return res.status(403).json({ error: 'You can only retry your own orders' });
+        }
+
+        // Check if product still has enough stock
+        if (order.productTransaction.product.quantity < order.productTransaction.quantity) {
+            return res.status(400).json({ error: 'Product no longer has enough stock' });
+        }
+
+        // Use transaction to ensure atomicity
+        const result = await prisma.$transaction(async (tx) => {
+            // Restore stock first (in case it wasn't restored properly)
+            await tx.product.update({
+                where: { id: order.productTransaction.productId },
+                data: { quantity: { increment: order.productTransaction.quantity } }
+            });
+
+            // Reserve stock again
+            await tx.product.update({
+                where: { id: order.productTransaction.productId },
+                data: { quantity: { decrement: order.productTransaction.quantity } }
+            });
+
+            // Reset order with new expiry
+            const newExpiresAt = new Date(Date.now() + ORDER_EXPIRY_MINUTES * 60 * 1000);
+            const updatedOrder = await tx.order.update({
+                where: { id: order.id },
+                data: {
+                    status: OrderStatus.PENDING as any,
+                    expiresAt: newExpiresAt,
+                    riderId: null
+                }
+            });
+
+            // Reset product transaction status
+            await tx.productTransaction.update({
+                where: { id: order.productTransactionId },
+                data: { status: ProductTransactionStatus.PENDING as any }
+            });
+
+            return updatedOrder;
+        });
+
+        // Notify user about retry
+        await NotificationService.create({
+            userId,
+            type: NotificationType.ORDER,
+            title: 'Order Retry Available',
+            message: `Your order #${order.id} has been retried. Please complete payment within ${ORDER_EXPIRY_MINUTES} minutes.`,
+            data: { orderId: order.id }
+        });
+
+        return successResponse(res, 'success', {
+            message: 'Order retried successfully',
+            expiresAt: result.expiresAt
+        });
+    } catch (error: any) {
+        console.error('retryExpiredOrder error:', error);
+        return errorResponse(res, 'error', error.message || 'Failed to retry order');
+    }
+};
+
+// ─────────────── Clean up expired unpaid orders ───────────────
+export const cleanupExpiredUnpaidOrders = async (req: Request, res: Response) => {
+    try {
+        const expiredOrders = await prisma.order.findMany({
+            where: {
+                status: OrderStatus.PENDING as any,
+                expiresAt: { lt: new Date() }
+            },
+            include: {
+                productTransaction: {
+                    include: {
+                        product: { select: { id: true, quantity: true } },
+                        buyer: { include: { profile: true } }
+                    }
+                }
+            }
+        });
+
+        for (const order of expiredOrders) {
+            // Use transaction to ensure data consistency
+            await prisma.$transaction(async (tx) => {
+                // Update order status to expired
+                await tx.order.update({
+                    where: { id: order.id },
+                    data: { status: OrderStatus.EXPIRED as any }
+                });
+
+                // Restore stock to product
+                if (order.productTransaction?.product) {
+                    await tx.product.update({
+                        where: { id: order.productTransaction.product.id },
+                        data: { 
+                            quantity: { increment: order.productTransaction.quantity }
+                        }
+                    });
+                }
+
+                // Update product transaction status
+                await tx.productTransaction.update({
+                    where: { id: order.productTransactionId },
+                    data: { status: ProductTransactionStatus.PENDING as any }
+                });
+            });
+
+            // Notify buyer about expired order
+            await NotificationService.create({
+                userId: order.productTransaction.buyerId,
+                type: NotificationType.ORDER,
+                title: 'Order Expired',
+                message: `Your order #${order.id} has expired due to non-payment. Stock has been restored. Please place a new order if still interested.`,
+                data: { orderId: order.id }
+            });
+
+            console.log(`Cleaned up expired order #${order.id} and restored ${order.productTransaction.quantity} units to stock`);
+        }
+
+        return successResponse(res, 'success', { cleaned: expiredOrders.length });
+    } catch (err) {
+        console.error('cleanupExpiredUnpaidOrders error:', err);
+        return errorResponse(res, 'error', 'Error cleaning up expired orders');
+    }
+};
+
 // ─────────────── CREATE ORDER (delivery) ───────────────
 export const createOrder = async (req: Request, res: Response) => {
     const { id } = req.user;

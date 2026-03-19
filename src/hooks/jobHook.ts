@@ -16,7 +16,7 @@ export const onJobStatusUpdate = async (job: { clientId: string; professionalId:
                     totalJobs: await prisma.job.count({ where: { clientId: job.clientId } }),
                     totalJobsPending: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.PENDING as any } }),
                     totalJobsOngoing: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.ONGOING as any } }),
-                    totalJobsDeclined: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.DECLINED as any } }),
+                    totalJobsDeclined: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.REJECTED as any } }),
                     totalJobsCompleted: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.COMPLETED as any } }),
                     totalJobsApproved: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.APPROVED as any } }),
                     totalJobsCanceled: await prisma.job.count({ where: { clientId: job.clientId, status: JobStatus.CANCELLED as any } }),
@@ -36,7 +36,7 @@ export const onJobStatusUpdate = async (job: { clientId: string; professionalId:
                     totalJobs: await prisma.job.count({ where: { professionalId: job.professionalId } }),
                     totalJobsPending: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.PENDING as any } }),
                     totalJobsOngoing: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.ONGOING as any } }),
-                    totalJobsDeclined: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.DECLINED as any } }),
+                    totalJobsDeclined: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.REJECTED as any } }),
                     totalJobsCompleted: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.COMPLETED as any } }),
                     totalJobsApproved: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.APPROVED as any } }),
                     totalJobsCanceled: await prisma.job.count({ where: { professionalId: job.professionalId, status: JobStatus.CANCELLED as any } }),
@@ -49,7 +49,7 @@ export const onJobStatusUpdate = async (job: { clientId: string; professionalId:
             const approvedSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.APPROVED as any }, _sum: { workmanship: true } });
             const completedSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.COMPLETED as any }, _sum: { workmanship: true } });
             const pendingSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.PENDING as any }, _sum: { workmanship: true } });
-            const declinedSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.DECLINED as any }, _sum: { workmanship: true } });
+            const declinedSum = await prisma.job.aggregate({ where: { professionalId: job.professionalId, status: JobStatus.REJECTED as any }, _sum: { workmanship: true } });
 
             await prisma.professional.update({
                 where: { id: professional.id },

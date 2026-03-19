@@ -137,9 +137,9 @@ enum AccountType {
 }
 
 enum EntryCategory {
-  ec_job      @map("job")
-  ec_product  @map("product")
-  ec_delivery @map("delivery")
+  job      @map("job")
+  product  @map("product")
+  delivery @map("delivery")
 }
 
 enum WorkType {

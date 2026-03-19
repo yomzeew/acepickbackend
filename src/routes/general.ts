@@ -24,7 +24,7 @@ import { addProduct, deleteProduct, getProducts, getMyProducts, updateProduct, s
 import { addCategory, deleteCategory, getCategories, updateCategory } from "../controllers/category";
 import { uploads } from "../services/upload";
 import { uploadFiles } from "../controllers/upload";
-import { acceptOrder, cancelOrder, confirmDelivery, confirmPickup, createOrder, deliverOrder, disputeOrder, enRouteToPickup, arrivedAtPickup, arrivedAtDropoff, expireStaleOrders, retryRiderSearch, getOrderById, getNearestPaidOrders, getOrdersBuyer, getOrdersRider, getOrdersSeller, pickupOrder, resolveDispute, transportOrder } from "../controllers/order";
+import { acceptOrder, cancelOrder, confirmDelivery, confirmPickup, createOrder, deliverOrder, disputeOrder, enRouteToPickup, arrivedAtPickup, arrivedAtDropoff, expireStaleOrders, retryRiderSearch, getOrderById, getNearestPaidOrders, getOrdersBuyer, getOrdersRider, getOrdersSeller, pickupOrder, resolveDispute, transportOrder, cleanupExpiredUnpaidOrders, retryExpiredOrder } from "../controllers/order";
 import { giveRating, isRated } from "../controllers/rating";
 import { deleteReview, editReview, giveReview } from "../controllers/review";
 import { getClientDashboard, getProfessionalDashboard, getDeliveryDashboard } from "../controllers/dashboard";
@@ -186,7 +186,8 @@ routes.put('/orders/arrived_at_dropoff/:orderId', allowRoles(UserRole.DELIVERY),
 routes.put('/orders/deliver/:orderId', allowRoles(UserRole.DELIVERY), deliverOrder);
 routes.put('/orders/confirm_delivery/:productTransactionId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), confirmDelivery);
 routes.put('/orders/cancel/:orderId', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), cancelOrder);
-routes.post('/orders/retry/:orderId', allowRoles(UserRole.CLIENT), retryRiderSearch);
+routes.post('/orders/retry-rider/:orderId', allowRoles(UserRole.CLIENT), retryRiderSearch);
+routes.post('/orders/retry/:orderId', allowRoles(UserRole.CLIENT), retryExpiredOrder);
 routes.post('/orders/expire-stale', allowRoles(UserRole.ADMIN), expireStaleOrders);
 routes.post('/orders/dispute', allowRoles(UserRole.CLIENT, UserRole.PROFESSIONAL), disputeOrder);
 routes.post('/orders/dispute/resolve/:disputeId', resolveDispute);
@@ -208,5 +209,8 @@ routes.put('/notifications/read-all', markAllAsRead);
 routes.put('/notifications/:notificationId/read', markAsRead);
 routes.delete('/notifications/:notificationId', deleteNotification);
 routes.delete('/notifications', deleteAllNotifications);
+
+// Order cleanup route (admin only or cron job)
+routes.post('/orders/cleanup-expired', allowRoles(UserRole.ADMIN), cleanupExpiredUnpaidOrders);
 
 export default routes;

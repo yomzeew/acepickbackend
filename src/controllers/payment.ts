@@ -615,6 +615,66 @@ export const handlePaystackWebhook = async (req: Request, res: Response) => {
             }
 
             return handleResponse(res, 200, true, 'Handled');
+        } else if (payload.event.includes('charge.failed')) {
+            const { reference } = payload.data;
+
+            const transaction = await prisma.transaction.findFirst({
+                where: { reference },
+                include: {
+                    user: { include: { onlineUser: true } }
+                }
+            });
+
+            if (!transaction) {
+                return res.status(200).send('Transaction not found');
+            }
+
+            // Update transaction status to failed
+            await prisma.transaction.update({
+                where: { id: transaction.id },
+                data: { status: TransactionStatus.FAILED as any }
+            });
+
+            // Restore stock for product transactions
+            if (transaction.productTransactionId) {
+                await prisma.$transaction(async (tx) => {
+                    const productTransaction = await tx.productTransaction.findUnique({
+                        where: { id: transaction.productTransactionId },
+                        include: { product: { select: { id: true, quantity: true } } }
+                    });
+
+                    if (productTransaction) {
+                        // Restore stock
+                        await tx.product.update({
+                            where: { id: productTransaction.productId },
+                            data: { quantity: { increment: productTransaction.quantity } }
+                        });
+
+                        // Update product transaction status
+                        await tx.productTransaction.update({
+                            where: { id: productTransaction.id },
+                            data: { status: ProductTransactionStatus.PENDING as any }
+                        });
+
+                        // Cancel associated order if exists
+                        await tx.order.updateMany({
+                            where: { productTransactionId: productTransaction.id },
+                            data: { status: OrderStatus.CANCELLED as any }
+                        });
+                    }
+                });
+            }
+
+            // Notify user about failed payment
+            await NotificationService.create({
+                userId: transaction.userId,
+                type: NotificationType.PAYMENT,
+                title: 'Payment Failed',
+                message: `Your payment of ${transaction.amount} failed. Stock has been restored. Please try again.`,
+                data: { transactionId: transaction.id }
+            });
+
+            return handleResponse(res, 200, true, 'Payment failure handled');
         } else {
             return handleResponse(res, 400, false, 'Invalid event type')
         }

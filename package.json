@@ -13,6 +13,7 @@
     "prisma:push": "prisma db push",
     "prisma:seed": "prisma db seed",
     "prisma:seed-smart": "npx ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed-smart.ts",
+    "cleanup:orders": "npx ts-node --compiler-options {\"module\":\"CommonJS\"} scripts/cleanupOrders.ts",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f api",

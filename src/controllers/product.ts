@@ -261,6 +261,8 @@ export const restockProduct = async (req: Request, res: Response) => {
 
 
 export const selectProduct = async (req: Request, res: Response) => {
+    let productId: number | undefined, quantity: number | undefined, orderMethod: string | undefined;
+    
     try {
         const result = selectProductSchema.safeParse(req.body);
 
@@ -268,35 +270,66 @@ export const selectProduct = async (req: Request, res: Response) => {
             return res.status(400).json({ error: result.error.format() });
         }
 
-        const { productId, quantity, orderMethod } = result.data;
+        ({ productId, quantity, orderMethod } = result.data);
 
-        const product = await prisma.product.findUnique({ where: { id: productId } });
+        // Use transaction to prevent race conditions and ensure stock reservation
+        const resultTransaction = await prisma.$transaction(async (tx) => {
+            // Lock and check product stock
+            const product = await tx.product.findUnique({ 
+                where: { id: productId },
+                select: { id: true, quantity: true, userId: true, price: true, discount: true }
+            });
 
-        if (!product) {
-            return res.status(404).json({ error: 'Product not found' });
-        }
-
-        if (product.quantity < quantity) {
-            return res.status(400).json({ error: 'Product quantity is not enough' });
-        }
-
-        const price = new Decimal(product.price).mul(quantity).sub(new Decimal(product.discount || 0).mul(quantity));
-
-        const productTransaction = await prisma.productTransaction.create({
-            data: {
-                productId,
-                quantity,
-                buyerId: req.user.id,
-                sellerId: product.userId,
-                price,
-                orderMethod: orderMethod as any,
-                date: new Date()
+            if (!product) {
+                throw new Error('Product not found');
             }
-        })
 
-        return successResponse(res, 'success', productTransaction)
+            if (product.quantity < quantity) {
+                throw new Error('Product quantity is not enough');
+            }
+
+            // Reserve stock by reducing available quantity
+            const updatedProduct = await tx.product.update({
+                where: { id: productId },
+                data: { 
+                    quantity: { decrement: quantity }
+                }
+            });
+
+            // Calculate price
+            const price = new Decimal(updatedProduct.price).mul(quantity).sub(new Decimal(updatedProduct.discount || 0).mul(quantity));
+
+            // Create product transaction
+            const productTransaction = await tx.productTransaction.create({
+                data: {
+                    productId,
+                    quantity,
+                    buyerId: req.user.id,
+                    sellerId: product.userId,
+                    price,
+                    orderMethod: orderMethod as any,
+                    date: new Date()
+                }
+            });
+
+            return { productTransaction, remainingStock: updatedProduct.quantity };
+        });
+
+        return successResponse(res, 'success', {
+            ...resultTransaction.productTransaction,
+            remainingStock: resultTransaction.remainingStock
+        });
     } catch (error: any) {
-        return errorResponse(res, 'error', error.message);
+        // If transaction fails, stock is automatically rolled back
+        console.error('selectProduct error:', {
+            error: error.message,
+            productId: productId || 'unknown',
+            quantity: quantity || 'unknown',
+            orderMethod: orderMethod || 'unknown',
+            userId: req.user.id,
+            timestamp: new Date().toISOString()
+        });
+        return errorResponse(res, 'error', error.message || 'Failed to select product');
     }
 }
 
