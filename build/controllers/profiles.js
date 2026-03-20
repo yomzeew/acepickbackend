@@ -92,7 +92,7 @@ const UserAccountInfo = (req, res) => __awaiter(void 0, void 0, void 0, function
         return (0, modules_1.successResponse)(res, "Successful", result);
     }
     catch (error) {
-        return (0, modules_1.errorResponse)(res, "Failed", error);
+        return (0, modules_1.errorResponse)(res, "Failed", { error: (error === null || error === void 0 ? void 0 : error.message) || "Unknown error" });
     }
 });
 exports.UserAccountInfo = UserAccountInfo;

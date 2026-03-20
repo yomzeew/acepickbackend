@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NotificationType = exports.EntryCategory = exports.CommissionScope = exports.CommissionType = exports.Accounts = exports.RiderStatus = exports.VehicleType = exports.TransactionDescription = exports.OrderStatus = exports.OrderMethod = exports.ProductTransactionStatus = exports.ENV = exports.ProductStatus = exports.TransferStatus = exports.TransactionType = exports.TransactionStatus = exports.PaidFor = exports.JobStatus = exports.ActivityStatus = exports.PayStatus = exports.JobMode = exports.UserState = exports.UserStatus = exports.UserRole = exports.VerificationType = exports.OTPReason = void 0;
+exports.NotificationType = exports.EntryCategory = exports.CommissionScope = exports.CommissionType = exports.Accounts = exports.RiderStatus = exports.VehicleType = exports.TransactionDescription = exports.OrderStatus = exports.OrderMethod = exports.ReturnStatus = exports.ProductTransactionStatus = exports.ENV = exports.ProductStatus = exports.TransferStatus = exports.TransactionType = exports.TransactionStatus = exports.PaidFor = exports.JobStatus = exports.ActivityStatus = exports.PayStatus = exports.JobMode = exports.UserState = exports.UserStatus = exports.UserRole = exports.VerificationType = exports.OTPReason = void 0;
 var OTPReason;
 (function (OTPReason) {
     OTPReason["VERIFICATION"] = "verification";
@@ -102,9 +102,23 @@ var ProductTransactionStatus;
 (function (ProductTransactionStatus) {
     ProductTransactionStatus["PENDING"] = "pending";
     ProductTransactionStatus["ORDERED"] = "ordered";
+    ProductTransactionStatus["ACCEPTED_BY_SELLER"] = "accepted_by_seller";
+    ProductTransactionStatus["REJECTED_BY_SELLER"] = "rejected_by_seller";
+    ProductTransactionStatus["READY_FOR_DELIVERY"] = "ready_for_delivery";
     ProductTransactionStatus["DELIVERED"] = "delivered";
+    ProductTransactionStatus["AWAITING_CONFIRMATION"] = "awaiting_confirmation";
+    ProductTransactionStatus["COMPLETED"] = "completed";
+    ProductTransactionStatus["RETURN_REQUESTED"] = "return_requested";
+    ProductTransactionStatus["RETURNED"] = "returned";
+    ProductTransactionStatus["CANCELLED"] = "cancelled";
     ProductTransactionStatus["DISPUTED"] = "disputed";
 })(ProductTransactionStatus || (exports.ProductTransactionStatus = ProductTransactionStatus = {}));
+var ReturnStatus;
+(function (ReturnStatus) {
+    ReturnStatus["PENDING"] = "pending";
+    ReturnStatus["APPROVED"] = "approved";
+    ReturnStatus["REJECTED"] = "rejected";
+})(ReturnStatus || (exports.ReturnStatus = ReturnStatus = {}));
 var OrderMethod;
 (function (OrderMethod) {
     OrderMethod["SELF_PICKUP"] = "self_pickup";

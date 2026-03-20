@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.disputeSchema = exports.updateCommissionSchema = exports.commissionSchema = exports.addReviewSchema = exports.addRatingSchema = exports.deliverySchema = exports.productTransactionIdSchema = exports.restockProductSchema = exports.selectProductSchema = exports.initPaymentSchema = exports.updateProductSchema = exports.createProductSchema = exports.updatePortfolioSchema = exports.portfolioSchema = exports.updateExperienceSchema = exports.experienceSchema = exports.updateCertificationSchema = exports.certificationSchema = exports.updateEducationSchema = exports.educationSchema = exports.pinForgotSchema = exports.pinResetSchema = exports.withdrawSchema = exports.productPaymentSchema = exports.paymentSchema = exports.resolveBankSchema = exports.bankDetailsSchema = exports.updateLocationSchema = exports.storeLocationSchema = exports.jobCostingUpdateSchema = exports.jobCostingSchema = exports.jobUpdateSchema = exports.jobPostSchema = exports.updateUserProfileSchema = exports.registerRiderSchema = exports.updateRiderSchema = exports.riderSchema = exports.registerCoporateSchema = exports.registrationProfSchema = exports.registrationSchema = exports.verifyOTPSchema = exports.otpRequestSchema = void 0;
+exports.sellerRejectSchema = exports.returnRequestSchema = exports.disputeSchema = exports.updateCommissionSchema = exports.commissionSchema = exports.addReviewSchema = exports.addRatingSchema = exports.deliverySchema = exports.productTransactionIdSchema = exports.restockProductSchema = exports.selectProductSchema = exports.initPaymentSchema = exports.updateProductSchema = exports.createProductSchema = exports.updatePortfolioSchema = exports.portfolioSchema = exports.updateExperienceSchema = exports.experienceSchema = exports.updateCertificationSchema = exports.certificationSchema = exports.updateEducationSchema = exports.educationSchema = exports.pinForgotSchema = exports.pinResetSchema = exports.withdrawSchema = exports.productPaymentSchema = exports.paymentSchema = exports.resolveBankSchema = exports.bankDetailsSchema = exports.updateLocationSchema = exports.storeLocationSchema = exports.jobCostingUpdateSchema = exports.jobCostingSchema = exports.jobUpdateSchema = exports.jobPostSchema = exports.updateUserProfileSchema = exports.registerRiderSchema = exports.updateRiderSchema = exports.riderSchema = exports.registerCoporateSchema = exports.registrationProfSchema = exports.registrationSchema = exports.verifyOTPSchema = exports.otpRequestSchema = void 0;
 const zod_1 = require("zod");
 const enum_1 = require("../utils/enum"); // adjust the path
 const enum_2 = require("../utils/enum");
@@ -872,4 +872,26 @@ exports.disputeSchema = zod_1.z.object({
 }).refine((data) => data.jobId || data.productTransactionId, {
     message: "Either jobId or productTransactionId must be provided",
     path: ["jobId"],
+});
+exports.returnRequestSchema = zod_1.z.object({
+    reason: zod_1.z
+        .string({ required_error: "Reason is required" })
+        .min(1, "Reason cannot be empty"),
+    description: zod_1.z
+        .string({ required_error: "Description is required" })
+        .min(5, "Description must be at least 5 characters"),
+    evidence: zod_1.z
+        .string()
+        .url("Evidence must be a valid URL")
+        .optional()
+        .or(zod_1.z.literal("").transform(() => undefined)),
+    productTransactionId: zod_1.z
+        .number({ required_error: "Product transaction ID is required" })
+        .int("Product transaction ID must be an integer")
+        .positive("Product transaction ID must be positive"),
+});
+exports.sellerRejectSchema = zod_1.z.object({
+    reason: zod_1.z
+        .string({ required_error: "Reason is required" })
+        .min(1, "Please provide a reason for rejection"),
 });

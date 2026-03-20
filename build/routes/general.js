@@ -162,12 +162,25 @@ routes.put('/orders/arrived_at_dropoff/:orderId', (0, allowRoles_1.allowRoles)(e
 routes.put('/orders/deliver/:orderId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.DELIVERY), order_1.deliverOrder);
 routes.put('/orders/confirm_delivery/:productTransactionId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL), order_1.confirmDelivery);
 routes.put('/orders/cancel/:orderId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL), order_1.cancelOrder);
-routes.post('/orders/retry/:orderId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT), order_1.retryRiderSearch);
+routes.post('/orders/retry-rider/:orderId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT), order_1.retryRiderSearch);
+routes.post('/orders/retry/:orderId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT), order_1.retryExpiredOrder);
 routes.post('/orders/expire-stale', (0, allowRoles_1.allowRoles)(enum_1.UserRole.ADMIN), order_1.expireStaleOrders);
 routes.post('/orders/dispute', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL), order_1.disputeOrder);
 routes.post('/orders/dispute/resolve/:disputeId', order_1.resolveDispute);
+// Seller order management
+routes.put('/orders/seller-accept/:productTransactionId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL), order_1.sellerAcceptOrder);
+routes.put('/orders/seller-reject/:productTransactionId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL), order_1.sellerRejectOrder);
+routes.put('/orders/seller-mark-ready/:productTransactionId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL), order_1.sellerMarkReady);
+routes.put('/orders/seller-confirm/:productTransactionId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL), order_1.sellerConfirmCompletion);
+// Return requests
+routes.post('/orders/return-request', (0, allowRoles_1.allowRoles)(enum_1.UserRole.CLIENT), order_1.requestReturn);
+routes.post('/orders/return-request/resolve/:returnRequestId', (0, allowRoles_1.allowRoles)(enum_1.UserRole.ADMIN), order_1.resolveReturnRequest);
+// Auto-release payments (cron / admin)
+routes.post('/orders/auto-release-payments', (0, allowRoles_1.allowRoles)(enum_1.UserRole.ADMIN), order_1.autoReleasePayments);
 routes.post('/ratings', rating_1.giveRating);
 routes.get('/is-rated', rating_1.isRated);
+routes.get('/reviews/my', review_1.getMyReviews);
+routes.get('/reviews/user/:userId', review_1.getReviewsForUser);
 routes.post('/reviews', review_1.giveReview);
 routes.put('/reviews/:reviewId', review_1.editReview);
 routes.delete('/reviews/:reviewId', review_1.deleteReview);
@@ -181,4 +194,6 @@ routes.put('/notifications/read-all', notifications_1.markAllAsRead);
 routes.put('/notifications/:notificationId/read', notifications_1.markAsRead);
 routes.delete('/notifications/:notificationId', notifications_1.deleteNotification);
 routes.delete('/notifications', notifications_1.deleteAllNotifications);
+// Order cleanup route (admin only or cron job)
+routes.post('/orders/cleanup-expired', (0, allowRoles_1.allowRoles)(enum_1.UserRole.ADMIN), order_1.cleanupExpiredUnpaidOrders);
 exports.default = routes;

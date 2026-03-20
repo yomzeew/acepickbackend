@@ -527,6 +527,58 @@ const handlePaystackWebhook = (req, res) => __awaiter(void 0, void 0, void 0, fu
             }
             return (0, modules_1.handleResponse)(res, 200, true, 'Handled');
         }
+        else if (payload.event.includes('charge.failed')) {
+            const { reference } = payload.data;
+            const transaction = yield prisma_1.default.transaction.findFirst({
+                where: { reference },
+                include: {
+                    user: { include: { onlineUser: true } }
+                }
+            });
+            if (!transaction) {
+                return res.status(200).send('Transaction not found');
+            }
+            // Update transaction status to failed
+            yield prisma_1.default.transaction.update({
+                where: { id: transaction.id },
+                data: { status: enum_1.TransactionStatus.FAILED }
+            });
+            // Restore stock for product transactions
+            if (transaction.productTransactionId) {
+                yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+                    const productTransaction = yield tx.productTransaction.findUnique({
+                        where: { id: transaction.productTransactionId },
+                        include: { product: { select: { id: true, quantity: true } } }
+                    });
+                    if (productTransaction) {
+                        // Restore stock
+                        yield tx.product.update({
+                            where: { id: productTransaction.productId },
+                            data: { quantity: { increment: productTransaction.quantity } }
+                        });
+                        // Update product transaction status
+                        yield tx.productTransaction.update({
+                            where: { id: productTransaction.id },
+                            data: { status: enum_1.ProductTransactionStatus.PENDING }
+                        });
+                        // Cancel associated order if exists
+                        yield tx.order.updateMany({
+                            where: { productTransactionId: productTransaction.id },
+                            data: { status: enum_1.OrderStatus.CANCELLED }
+                        });
+                    }
+                }));
+            }
+            // Notify user about failed payment
+            yield notification_1.NotificationService.create({
+                userId: transaction.userId,
+                type: enum_2.NotificationType.PAYMENT,
+                title: 'Payment Failed',
+                message: `Your payment of ${transaction.amount} failed. Stock has been restored. Please try again.`,
+                data: { transactionId: transaction.id }
+            });
+            return (0, modules_1.handleResponse)(res, 200, true, 'Payment failure handled');
+        }
         else {
             return (0, modules_1.handleResponse)(res, 400, false, 'Invalid event type');
         }

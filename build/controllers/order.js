@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getOrderById = exports.retryRiderSearch = exports.expireStaleOrders = exports.resolveDispute = exports.disputeOrder = exports.cancelOrder = exports.confirmDelivery = exports.transportOrder = exports.deliverOrder = exports.arrivedAtDropoff = exports.confirmPickup = exports.pickupOrder = exports.arrivedAtPickup = exports.enRouteToPickup = exports.acceptOrder = exports.getOrdersSeller = exports.getOrdersBuyer = exports.getOrdersRider = exports.getNearestPaidOrders = exports.createOrder = exports.notifyNearbyRiders = void 0;
+exports.autoReleasePayments = exports.resolveReturnRequest = exports.requestReturn = exports.sellerConfirmCompletion = exports.sellerMarkReady = exports.sellerRejectOrder = exports.sellerAcceptOrder = exports.getOrderById = exports.retryRiderSearch = exports.expireStaleOrders = exports.resolveDispute = exports.disputeOrder = exports.cancelOrder = exports.confirmDelivery = exports.releasePaymentToSeller = exports.transportOrder = exports.deliverOrder = exports.arrivedAtDropoff = exports.confirmPickup = exports.pickupOrder = exports.arrivedAtPickup = exports.enRouteToPickup = exports.acceptOrder = exports.getOrdersSeller = exports.getOrdersBuyer = exports.getOrdersRider = exports.getNearestPaidOrders = exports.createOrder = exports.cleanupExpiredUnpaidOrders = exports.retryExpiredOrder = exports.notifyNearbyRiders = void 0;
 const body_1 = require("../validation/body");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const enum_1 = require("../utils/enum");
@@ -87,6 +87,142 @@ const notifyRidersRequestClosed = (orderId, assignedRiderId) => __awaiter(void 0
         console.error('notifyRidersRequestClosed error:', err);
     }
 });
+// ─────────────── Retry expired order ───────────────
+const retryExpiredOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { orderId } = req.params;
+        const userId = req.user.id;
+        const order = yield prisma_1.default.order.findFirst({
+            where: {
+                id: Number(orderId),
+                status: enum_1.OrderStatus.EXPIRED
+            },
+            include: {
+                productTransaction: {
+                    include: {
+                        product: true,
+                        buyer: { select: { id: true } }
+                    }
+                }
+            }
+        });
+        if (!order) {
+            return res.status(404).json({ error: 'Expired order not found' });
+        }
+        if (order.productTransaction.buyerId !== userId) {
+            return res.status(403).json({ error: 'You can only retry your own orders' });
+        }
+        // Check if product still has enough stock
+        if (order.productTransaction.product.quantity < order.productTransaction.quantity) {
+            return res.status(400).json({ error: 'Product no longer has enough stock' });
+        }
+        // Use transaction to ensure atomicity
+        const result = yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            // Restore stock first (in case it wasn't restored properly)
+            yield tx.product.update({
+                where: { id: order.productTransaction.productId },
+                data: { quantity: { increment: order.productTransaction.quantity } }
+            });
+            // Reserve stock again
+            yield tx.product.update({
+                where: { id: order.productTransaction.productId },
+                data: { quantity: { decrement: order.productTransaction.quantity } }
+            });
+            // Reset order with new expiry
+            const newExpiresAt = new Date(Date.now() + ORDER_EXPIRY_MINUTES * 60 * 1000);
+            const updatedOrder = yield tx.order.update({
+                where: { id: order.id },
+                data: {
+                    status: enum_1.OrderStatus.PENDING,
+                    expiresAt: newExpiresAt,
+                    riderId: null
+                }
+            });
+            // Reset product transaction status
+            yield tx.productTransaction.update({
+                where: { id: order.productTransactionId },
+                data: { status: enum_1.ProductTransactionStatus.PENDING }
+            });
+            return updatedOrder;
+        }));
+        // Notify user about retry
+        yield notification_1.NotificationService.create({
+            userId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Order Retry Available',
+            message: `Your order #${order.id} has been retried. Please complete payment within ${ORDER_EXPIRY_MINUTES} minutes.`,
+            data: { orderId: order.id }
+        });
+        return (0, modules_1.successResponse)(res, 'success', {
+            message: 'Order retried successfully',
+            expiresAt: result.expiresAt
+        });
+    }
+    catch (error) {
+        console.error('retryExpiredOrder error:', error);
+        return (0, modules_1.errorResponse)(res, 'error', error.message || 'Failed to retry order');
+    }
+});
+exports.retryExpiredOrder = retryExpiredOrder;
+// ─────────────── Clean up expired unpaid orders ───────────────
+const cleanupExpiredUnpaidOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const expiredOrders = yield prisma_1.default.order.findMany({
+            where: {
+                status: enum_1.OrderStatus.PENDING,
+                expiresAt: { lt: new Date() }
+            },
+            include: {
+                productTransaction: {
+                    include: {
+                        product: { select: { id: true, quantity: true } },
+                        buyer: { include: { profile: true } }
+                    }
+                }
+            }
+        });
+        for (const order of expiredOrders) {
+            // Use transaction to ensure data consistency
+            yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+                var _a;
+                // Update order status to expired
+                yield tx.order.update({
+                    where: { id: order.id },
+                    data: { status: enum_1.OrderStatus.EXPIRED }
+                });
+                // Restore stock to product
+                if ((_a = order.productTransaction) === null || _a === void 0 ? void 0 : _a.product) {
+                    yield tx.product.update({
+                        where: { id: order.productTransaction.product.id },
+                        data: {
+                            quantity: { increment: order.productTransaction.quantity }
+                        }
+                    });
+                }
+                // Update product transaction status
+                yield tx.productTransaction.update({
+                    where: { id: order.productTransactionId },
+                    data: { status: enum_1.ProductTransactionStatus.PENDING }
+                });
+            }));
+            // Notify buyer about expired order
+            yield notification_1.NotificationService.create({
+                userId: order.productTransaction.buyerId,
+                type: enum_1.NotificationType.ORDER,
+                title: 'Order Expired',
+                message: `Your order #${order.id} has expired due to non-payment. Stock has been restored. Please place a new order if still interested.`,
+                data: { orderId: order.id }
+            });
+            console.log(`Cleaned up expired order #${order.id} and restored ${order.productTransaction.quantity} units to stock`);
+        }
+        return (0, modules_1.successResponse)(res, 'success', { cleaned: expiredOrders.length });
+    }
+    catch (err) {
+        console.error('cleanupExpiredUnpaidOrders error:', err);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error cleaning up expired orders');
+    }
+});
+exports.cleanupExpiredUnpaidOrders = cleanupExpiredUnpaidOrders;
 // ─────────────── CREATE ORDER (delivery) ───────────────
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
@@ -177,7 +313,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 userId: id,
                 action: `${(_b = productTransaction.buyer.profile) === null || _b === void 0 ? void 0 : _b.firstName} ${(_c = productTransaction.buyer.profile) === null || _c === void 0 ? void 0 : _c.lastName} has created Order #${order.id}`,
                 type: 'Order created',
-                status: 'success'
+                status: 'act_success'
             }
         });
         // Notify vendor
@@ -401,7 +537,7 @@ const acceptOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 userId: id,
                 action: `${riderName} has accepted Order #${orderId}`,
                 type: 'Order accepted',
-                status: 'success'
+                status: 'act_success'
             }
         });
         // Notify buyer
@@ -475,7 +611,7 @@ const riderStatusTransition = (req, res, fromStatus, toStatus, activityType, not
                 userId: id,
                 action: `${riderName} — Order #${order.id} → ${toStatus}`,
                 type: activityType,
-                status: 'success'
+                status: 'act_success'
             }
         });
         // Notify buyer
@@ -551,7 +687,7 @@ const confirmPickup = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 userId: id,
                 action: `Vendor confirmed pickup for Order #${order.id}`,
                 type: 'Order pickup confirmation',
-                status: 'success'
+                status: 'act_success'
             }
         });
         // Notify buyer
@@ -585,8 +721,171 @@ const transportOrder = (req, res) => __awaiter(void 0, void 0, void 0, function*
     return (0, modules_1.handleResponse)(res, 400, false, 'Use the new status progression endpoints instead');
 });
 exports.transportOrder = transportOrder;
+// ─────────────── REUSABLE: Release payment to seller (and rider if delivery) ───────────────
+const AUTO_RELEASE_HOURS = 24;
+const releasePaymentToSeller = (productTransactionId) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const productTransaction = yield prisma_1.default.productTransaction.findUnique({
+        where: { id: productTransactionId },
+        include: {
+            buyer: { include: { profile: true } },
+            seller: { include: { profile: true, wallet: true } },
+            order: true,
+        }
+    });
+    if (!productTransaction)
+        throw new Error('Product transaction not found');
+    if (productTransaction.paymentReleasedAt)
+        return; // already released
+    let amount = Number(productTransaction.price);
+    let commission = yield CommissionService_1.CommissionService.calculateCommission(amount, enum_1.CommissionScope.PRODUCT);
+    amount = amount - commission;
+    // Credit seller wallet
+    if (productTransaction.seller.wallet) {
+        yield prisma_1.default.wallet.update({
+            where: { id: productTransaction.seller.wallet.id },
+            data: {
+                previousBalance: productTransaction.seller.wallet.currentBalance,
+                currentBalance: Number(productTransaction.seller.wallet.currentBalance) + amount,
+            }
+        });
+    }
+    const productCashTransaction = yield prisma_1.default.transaction.create({
+        data: {
+            userId: productTransaction.seller.id,
+            amount: amount,
+            reference: (0, modules_1.randomId)(12),
+            status: enum_1.TransactionStatus.SUCCESS,
+            currency: 'NGN',
+            timestamp: new Date(),
+            description: 'product sale',
+            jobId: null,
+            productTransactionId: productTransaction.id,
+            type: enum_1.TransactionType.CREDIT,
+        }
+    });
+    yield ledgerService_1.LedgerService.createEntry([
+        {
+            transactionId: productCashTransaction.id,
+            userId: productCashTransaction.userId,
+            amount: Number(productCashTransaction.amount) + commission,
+            type: enum_1.TransactionType.DEBIT,
+            account: enum_1.Accounts.PLATFORM_ESCROW,
+            category: enum_1.EntryCategory.PRODUCT
+        },
+        {
+            transactionId: productCashTransaction.id,
+            userId: productCashTransaction.userId,
+            amount: productCashTransaction.amount,
+            type: enum_1.TransactionType.CREDIT,
+            account: enum_1.Accounts.PROFESSIONAL_WALLET,
+            category: enum_1.EntryCategory.PRODUCT
+        },
+        {
+            transactionId: productCashTransaction.id,
+            userId: null,
+            amount: commission,
+            type: enum_1.TransactionType.CREDIT,
+            account: enum_1.Accounts.PLATFORM_REVENUE,
+            category: enum_1.EntryCategory.PRODUCT
+        }
+    ]);
+    // Pay rider if delivery order exists
+    if (productTransaction.orderMethod === enum_1.OrderMethod.DELIVERY && productTransaction.order) {
+        yield prisma_1.default.order.update({
+            where: { id: productTransaction.order.id },
+            data: { status: enum_1.OrderStatus.CONFIRM_DELIVERY }
+        });
+        if (productTransaction.order.riderId) {
+            const rider = yield prisma_1.default.user.findUnique({
+                where: { id: productTransaction.order.riderId },
+                include: { wallet: true }
+            });
+            if (rider) {
+                amount = Number(productTransaction.order.cost);
+                commission = yield CommissionService_1.CommissionService.calculateCommission(amount, enum_1.CommissionScope.DELIVERY);
+                amount = amount - commission;
+                if (rider.wallet) {
+                    yield prisma_1.default.wallet.update({
+                        where: { id: rider.wallet.id },
+                        data: {
+                            previousBalance: rider.wallet.currentBalance,
+                            currentBalance: Number(rider.wallet.currentBalance) + amount,
+                        }
+                    });
+                }
+                const orderTransaction = yield prisma_1.default.transaction.create({
+                    data: {
+                        userId: rider.id,
+                        amount: amount,
+                        reference: (0, modules_1.randomId)(12),
+                        status: enum_1.TransactionStatus.SUCCESS,
+                        currency: 'NGN',
+                        timestamp: new Date(),
+                        description: 'delivery fee',
+                        jobId: null,
+                        productTransactionId: productTransaction.order.productTransactionId,
+                        type: enum_1.TransactionType.CREDIT,
+                    }
+                });
+                yield ledgerService_1.LedgerService.createEntry([
+                    {
+                        transactionId: orderTransaction.id,
+                        userId: orderTransaction.userId,
+                        amount: Number(orderTransaction.amount) + commission,
+                        type: enum_1.TransactionType.DEBIT,
+                        account: enum_1.Accounts.PLATFORM_ESCROW,
+                        category: enum_1.EntryCategory.DELIVERY
+                    },
+                    {
+                        transactionId: orderTransaction.id,
+                        userId: orderTransaction.userId,
+                        amount: orderTransaction.amount,
+                        type: enum_1.TransactionType.CREDIT,
+                        account: enum_1.Accounts.PROFESSIONAL_WALLET,
+                        category: enum_1.EntryCategory.DELIVERY
+                    },
+                    {
+                        transactionId: orderTransaction.id,
+                        userId: null,
+                        amount: commission,
+                        type: enum_1.TransactionType.CREDIT,
+                        account: enum_1.Accounts.PLATFORM_REVENUE,
+                        category: enum_1.EntryCategory.DELIVERY
+                    }
+                ]);
+            }
+        }
+    }
+    // Mark payment as released
+    yield prisma_1.default.productTransaction.update({
+        where: { id: productTransaction.id },
+        data: {
+            status: enum_1.ProductTransactionStatus.COMPLETED,
+            paymentReleasedAt: new Date(),
+        }
+    });
+    // Notify seller
+    yield notification_1.NotificationService.create({
+        userId: productTransaction.sellerId,
+        type: enum_1.NotificationType.PAYMENT,
+        title: 'Payment Released',
+        message: `Payment of ₦${Number(productTransaction.price).toLocaleString()} for "${(_a = productTransaction.seller.profile) === null || _a === void 0 ? void 0 : _a.firstName}" has been released to your wallet.`,
+        data: { productTransactionId: productTransaction.id },
+    });
+    // Notify buyer
+    yield notification_1.NotificationService.create({
+        userId: productTransaction.buyerId,
+        type: enum_1.NotificationType.ORDER,
+        title: 'Order Completed',
+        message: `Order #${productTransaction.id} has been completed and payment released to seller.`,
+        data: { productTransactionId: productTransaction.id },
+    });
+});
+exports.releasePaymentToSeller = releasePaymentToSeller;
+// ─────────────── Buyer: Confirm delivery (now sets awaiting_confirmation) ───────────────
 const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b;
     const { id } = req.user;
     const { productTransactionId } = req.params;
     try {
@@ -594,7 +893,7 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
             where: { id: Number(productTransactionId) },
             include: {
                 buyer: { include: { profile: true } },
-                seller: { include: { profile: true, wallet: true } },
+                seller: { include: { profile: true } },
                 order: true,
             }
         });
@@ -604,140 +903,38 @@ const confirmDelivery = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (productTransaction.buyerId !== id) {
             return (0, modules_1.handleResponse)(res, 400, false, 'You are not authorized to confirm this order');
         }
+        // For delivery orders, rider must have delivered first
         if (productTransaction.order && productTransaction.order.status !== enum_1.OrderStatus.DELIVERED) {
-            return (0, modules_1.handleResponse)(res, 400, false, 'Order not delivered');
+            return (0, modules_1.handleResponse)(res, 400, false, 'Order has not been delivered yet');
         }
-        let amount = Number(productTransaction.price);
-        let commission = yield CommissionService_1.CommissionService.calculateCommission(amount, enum_1.CommissionScope.PRODUCT);
-        amount = amount - commission;
-        // Credit seller wallet
-        if (productTransaction.seller.wallet) {
-            yield prisma_1.default.wallet.update({
-                where: { id: productTransaction.seller.wallet.id },
-                data: {
-                    previousBalance: productTransaction.seller.wallet.currentBalance,
-                    currentBalance: Number(productTransaction.seller.wallet.currentBalance) + amount,
-                }
-            });
-        }
+        const now = new Date();
+        const autoReleaseAt = new Date(now.getTime() + AUTO_RELEASE_HOURS * 60 * 60 * 1000);
+        // Move to awaiting_confirmation — seller must confirm before payment is released
         yield prisma_1.default.productTransaction.update({
             where: { id: productTransaction.id },
-            data: { status: enum_1.ProductTransactionStatus.DELIVERED }
-        });
-        const productCashTransaction = yield prisma_1.default.transaction.create({
             data: {
-                userId: productTransaction.seller.id,
-                amount: amount,
-                reference: (0, modules_1.randomId)(12),
-                status: enum_1.TransactionStatus.SUCCESS,
-                currency: 'NGN',
-                timestamp: new Date(),
-                description: 'product sale',
-                jobId: null,
-                productTransactionId: productTransaction.id,
-                type: enum_1.TransactionType.CREDIT,
+                status: enum_1.ProductTransactionStatus.AWAITING_CONFIRMATION,
+                deliveredAt: now,
+                autoReleaseAt: autoReleaseAt,
             }
         });
-        yield ledgerService_1.LedgerService.createEntry([
-            {
-                transactionId: productCashTransaction.id,
-                userId: productCashTransaction.userId,
-                amount: Number(productCashTransaction.amount) + commission,
-                type: enum_1.TransactionType.DEBIT,
-                account: enum_1.Accounts.PLATFORM_ESCROW,
-                category: enum_1.EntryCategory.PRODUCT
-            },
-            {
-                transactionId: productCashTransaction.id,
-                userId: productCashTransaction.userId,
-                amount: productCashTransaction.amount,
-                type: enum_1.TransactionType.CREDIT,
-                account: enum_1.Accounts.PROFESSIONAL_WALLET,
-                category: enum_1.EntryCategory.PRODUCT
-            },
-            {
-                transactionId: productCashTransaction.id,
-                userId: null,
-                amount: commission,
-                type: enum_1.TransactionType.CREDIT,
-                account: enum_1.Accounts.PLATFORM_REVENUE,
-                category: enum_1.EntryCategory.PRODUCT
-            }
-        ]);
-        if (productTransaction.orderMethod === enum_1.OrderMethod.DELIVERY && productTransaction.order) {
-            yield prisma_1.default.order.update({
-                where: { id: productTransaction.order.id },
-                data: { status: enum_1.OrderStatus.CONFIRM_DELIVERY }
-            });
-            const rider = yield prisma_1.default.user.findUnique({
-                where: { id: productTransaction.order.riderId },
-                include: { wallet: true }
-            });
-            if (!rider) {
-                throw new Error('Rider not found');
-            }
-            amount = Number(productTransaction.order.cost);
-            commission = yield CommissionService_1.CommissionService.calculateCommission(amount, enum_1.CommissionScope.DELIVERY);
-            amount = amount - commission;
-            if (rider.wallet) {
-                yield prisma_1.default.wallet.update({
-                    where: { id: rider.wallet.id },
-                    data: {
-                        previousBalance: rider.wallet.currentBalance,
-                        currentBalance: Number(rider.wallet.currentBalance) + amount,
-                    }
-                });
-            }
-            const orderTransaction = yield prisma_1.default.transaction.create({
-                data: {
-                    userId: rider.id,
-                    amount: amount,
-                    reference: (0, modules_1.randomId)(12),
-                    status: enum_1.TransactionStatus.SUCCESS,
-                    currency: 'NGN',
-                    timestamp: new Date(),
-                    description: 'wallet deposit',
-                    jobId: null,
-                    productTransactionId: productTransaction.order.productTransactionId,
-                    type: enum_1.TransactionType.CREDIT,
-                }
-            });
-            yield ledgerService_1.LedgerService.createEntry([
-                {
-                    transactionId: orderTransaction.id,
-                    userId: orderTransaction.userId,
-                    amount: Number(orderTransaction.amount) + commission,
-                    type: enum_1.TransactionType.DEBIT,
-                    account: enum_1.Accounts.PLATFORM_ESCROW,
-                    category: enum_1.EntryCategory.DELIVERY
-                },
-                {
-                    transactionId: orderTransaction.id,
-                    userId: orderTransaction.userId,
-                    amount: orderTransaction.amount,
-                    type: enum_1.TransactionType.CREDIT,
-                    account: enum_1.Accounts.PROFESSIONAL_WALLET,
-                    category: enum_1.EntryCategory.DELIVERY
-                },
-                {
-                    transactionId: orderTransaction.id,
-                    userId: null,
-                    amount: commission,
-                    type: enum_1.TransactionType.CREDIT,
-                    account: enum_1.Accounts.PLATFORM_REVENUE,
-                    category: enum_1.EntryCategory.DELIVERY
-                }
-            ]);
-        }
         yield prisma_1.default.activity.create({
             data: {
                 userId: productTransaction.buyerId,
-                action: `${(_a = productTransaction.buyer.profile) === null || _a === void 0 ? void 0 : _a.firstName} ${(_b = productTransaction.buyer.profile) === null || _b === void 0 ? void 0 : _b.lastName} has confirmed delivery of Order #${(_c = productTransaction.order) === null || _c === void 0 ? void 0 : _c.id}`,
+                action: `${(_a = productTransaction.buyer.profile) === null || _a === void 0 ? void 0 : _a.firstName} ${(_b = productTransaction.buyer.profile) === null || _b === void 0 ? void 0 : _b.lastName} has confirmed receiving Order #${productTransaction.id}`,
                 type: 'Order confirmation',
-                status: 'success'
+                status: 'act_success'
             }
         });
-        return (0, modules_1.successResponse)(res, 'success', 'Order confirmed successfully');
+        // Notify seller to confirm order completion
+        yield notification_1.NotificationService.create({
+            userId: productTransaction.sellerId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Buyer Confirmed Delivery',
+            message: `Buyer has confirmed receiving order #${productTransaction.id}. Please confirm order completion to release payment. Auto-release in ${AUTO_RELEASE_HOURS}h if no action taken.`,
+            data: { productTransactionId: productTransaction.id },
+        });
+        return (0, modules_1.successResponse)(res, 'success', 'Delivery confirmed. Awaiting seller confirmation to release payment.');
     }
     catch (error) {
         console.log(error);
@@ -841,7 +1038,7 @@ const disputeOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             userId: id,
             action: `${(_a = reporter === null || reporter === void 0 ? void 0 : reporter.profile) === null || _a === void 0 ? void 0 : _a.firstName} has raised a dispute for product transaction #${productTransaction.id}`,
             type: 'Product Transaction dispute',
-            status: 'pending'
+            status: 'act_pending'
         }
     });
     const emailMsg = (0, messages_1.disputedOrderEmail)(productTransaction, dispute);
@@ -871,7 +1068,7 @@ const resolveDispute = (req, res) => __awaiter(void 0, void 0, void 0, function*
             userId: id,
             action: `Dispute #${dispute.id} has been resolved by admin`,
             type: 'Dispute resolution',
-            status: 'success'
+            status: 'act_success'
         }
     });
     const emailMsg = (0, messages_1.resolveDisputeEmail)(dispute);
@@ -1001,3 +1198,506 @@ const getOrderById = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.getOrderById = getOrderById;
+// ═══════════════════════════════════════════════════════════════════════
+//  SELLER ORDER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════
+// ─────────────── Seller: Accept Order ───────────────
+const sellerAcceptOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+    try {
+        const pt = yield prisma_1.default.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                buyer: { include: { profile: true } },
+                seller: { include: { profile: true } },
+                product: true,
+            }
+        });
+        if (!pt)
+            return (0, modules_1.handleResponse)(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id)
+            return (0, modules_1.handleResponse)(res, 403, false, 'Only the seller can accept this order');
+        const status = pt.status;
+        if (status !== enum_1.ProductTransactionStatus.ORDERED) {
+            return (0, modules_1.handleResponse)(res, 400, false, `Cannot accept order in "${status}" status. Must be "ordered".`);
+        }
+        yield prisma_1.default.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: enum_1.ProductTransactionStatus.ACCEPTED_BY_SELLER }
+        });
+        yield notification_1.NotificationService.create({
+            userId: pt.buyerId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Order Accepted by Seller',
+            message: `${(_a = pt.seller.profile) === null || _a === void 0 ? void 0 : _a.firstName} has accepted your order for "${pt.product.name}". Preparing for delivery.`,
+            data: { productTransactionId: pt.id },
+        });
+        yield prisma_1.default.activity.create({
+            data: {
+                userId: id,
+                action: `Seller accepted order #${pt.id} for product "${pt.product.name}"`,
+                type: 'Seller order acceptance',
+                status: 'act_success',
+            }
+        });
+        return (0, modules_1.successResponse)(res, 'success', 'Order accepted successfully');
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error accepting order');
+    }
+});
+exports.sellerAcceptOrder = sellerAcceptOrder;
+// ─────────────── Seller: Reject Order ───────────────
+const sellerRejectOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+    const result = body_1.sellerRejectSchema.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ message: 'Validation error', errors: result.error.flatten() });
+    }
+    const { reason } = result.data;
+    try {
+        const pt = yield prisma_1.default.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                buyer: { include: { profile: true, wallet: true } },
+                seller: { include: { profile: true } },
+                product: true,
+                transactions: true,
+            }
+        });
+        if (!pt)
+            return (0, modules_1.handleResponse)(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id)
+            return (0, modules_1.handleResponse)(res, 403, false, 'Only the seller can reject this order');
+        const status = pt.status;
+        if (status !== enum_1.ProductTransactionStatus.ORDERED) {
+            return (0, modules_1.handleResponse)(res, 400, false, `Cannot reject order in "${status}" status. Must be "ordered".`);
+        }
+        // Reject the order
+        yield prisma_1.default.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: enum_1.ProductTransactionStatus.REJECTED_BY_SELLER }
+        });
+        // Restore stock
+        yield prisma_1.default.product.update({
+            where: { id: pt.productId },
+            data: { quantity: { increment: pt.quantity } }
+        });
+        // Refund buyer: move funds from escrow back to buyer wallet
+        if (pt.buyer.wallet) {
+            const refundAmount = Number(pt.price);
+            yield prisma_1.default.wallet.update({
+                where: { id: pt.buyer.wallet.id },
+                data: {
+                    previousBalance: pt.buyer.wallet.currentBalance,
+                    currentBalance: Number(pt.buyer.wallet.currentBalance) + refundAmount,
+                }
+            });
+            const refundTx = yield prisma_1.default.transaction.create({
+                data: {
+                    userId: pt.buyerId,
+                    amount: refundAmount,
+                    reference: (0, modules_1.randomId)(12),
+                    status: enum_1.TransactionStatus.SUCCESS,
+                    currency: 'NGN',
+                    timestamp: new Date(),
+                    description: 'order refund - seller rejected',
+                    productTransactionId: pt.id,
+                    type: enum_1.TransactionType.CREDIT,
+                }
+            });
+            yield ledgerService_1.LedgerService.createEntry([
+                {
+                    transactionId: refundTx.id,
+                    userId: pt.buyerId,
+                    amount: refundAmount,
+                    type: enum_1.TransactionType.DEBIT,
+                    account: enum_1.Accounts.PLATFORM_ESCROW,
+                    category: enum_1.EntryCategory.PRODUCT
+                },
+                {
+                    transactionId: refundTx.id,
+                    userId: pt.buyerId,
+                    amount: refundAmount,
+                    type: enum_1.TransactionType.CREDIT,
+                    account: enum_1.Accounts.USER_WALLET,
+                    category: enum_1.EntryCategory.PRODUCT
+                }
+            ]);
+        }
+        yield notification_1.NotificationService.create({
+            userId: pt.buyerId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Order Rejected by Seller',
+            message: `${(_a = pt.seller.profile) === null || _a === void 0 ? void 0 : _a.firstName} has rejected your order for "${pt.product.name}". Reason: ${reason}. Your payment has been refunded.`,
+            data: { productTransactionId: pt.id },
+        });
+        return (0, modules_1.successResponse)(res, 'success', 'Order rejected. Buyer has been refunded.');
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error rejecting order');
+    }
+});
+exports.sellerRejectOrder = sellerRejectOrder;
+// ─────────────── Seller: Mark Ready for Delivery ───────────────
+const sellerMarkReady = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+    try {
+        const pt = yield prisma_1.default.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                buyer: { include: { profile: true } },
+                seller: { include: { profile: true } },
+                product: true,
+                order: true,
+            }
+        });
+        if (!pt)
+            return (0, modules_1.handleResponse)(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id)
+            return (0, modules_1.handleResponse)(res, 403, false, 'Only the seller can mark this order ready');
+        const status = pt.status;
+        if (status !== enum_1.ProductTransactionStatus.ACCEPTED_BY_SELLER) {
+            return (0, modules_1.handleResponse)(res, 400, false, `Cannot mark ready in "${status}" status. Must be "accepted_by_seller".`);
+        }
+        yield prisma_1.default.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: enum_1.ProductTransactionStatus.READY_FOR_DELIVERY }
+        });
+        yield notification_1.NotificationService.create({
+            userId: pt.buyerId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Order Ready',
+            message: `Your order for "${pt.product.name}" is ready for ${pt.orderMethod === 'delivery' ? 'pickup by rider' : 'self-pickup'}.`,
+            data: { productTransactionId: pt.id },
+        });
+        yield prisma_1.default.activity.create({
+            data: {
+                userId: id,
+                action: `Seller marked order #${pt.id} as ready for delivery`,
+                type: 'Seller order ready',
+                status: 'act_success',
+            }
+        });
+        return (0, modules_1.successResponse)(res, 'success', 'Order marked as ready for delivery');
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error marking order ready');
+    }
+});
+exports.sellerMarkReady = sellerMarkReady;
+// ─────────────── Seller: Confirm Order Completion (releases payment) ───────────────
+const sellerConfirmCompletion = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.user;
+    const { productTransactionId } = req.params;
+    try {
+        const pt = yield prisma_1.default.productTransaction.findUnique({
+            where: { id: Number(productTransactionId) },
+            include: {
+                seller: { include: { profile: true } },
+                product: true,
+            }
+        });
+        if (!pt)
+            return (0, modules_1.handleResponse)(res, 404, false, 'Product transaction not found');
+        if (pt.sellerId !== id)
+            return (0, modules_1.handleResponse)(res, 403, false, 'Only the seller can confirm completion');
+        const status = pt.status;
+        if (status !== enum_1.ProductTransactionStatus.AWAITING_CONFIRMATION) {
+            return (0, modules_1.handleResponse)(res, 400, false, `Cannot confirm in "${status}" status. Must be "awaiting_confirmation".`);
+        }
+        // Release payment to seller
+        yield (0, exports.releasePaymentToSeller)(pt.id);
+        yield prisma_1.default.activity.create({
+            data: {
+                userId: id,
+                action: `Seller confirmed completion of order #${pt.id}. Payment released.`,
+                type: 'Seller order completion',
+                status: 'act_success',
+            }
+        });
+        return (0, modules_1.successResponse)(res, 'success', 'Order confirmed as completed. Payment has been released.');
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error confirming order completion');
+    }
+});
+exports.sellerConfirmCompletion = sellerConfirmCompletion;
+// ═══════════════════════════════════════════════════════════════════════
+//  RETURN REQUEST SYSTEM
+// ═══════════════════════════════════════════════════════════════════════
+// ─────────────── Buyer: Request Return ───────────────
+const requestReturn = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.user;
+    const result = body_1.returnRequestSchema.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ message: 'Validation error', errors: result.error.flatten() });
+    }
+    const { reason, description, evidence, productTransactionId } = result.data;
+    try {
+        const pt = yield prisma_1.default.productTransaction.findUnique({
+            where: { id: productTransactionId },
+            include: {
+                buyer: { include: { profile: true } },
+                seller: { include: { profile: true } },
+                product: true,
+            }
+        });
+        if (!pt)
+            return (0, modules_1.handleResponse)(res, 404, false, 'Product transaction not found');
+        if (pt.buyerId !== id)
+            return (0, modules_1.handleResponse)(res, 403, false, 'Only the buyer can request a return');
+        const status = pt.status;
+        // Can only request return during awaiting_confirmation or delivered states
+        const returnableStatuses = [
+            enum_1.ProductTransactionStatus.AWAITING_CONFIRMATION,
+            enum_1.ProductTransactionStatus.DELIVERED,
+        ];
+        if (!returnableStatuses.includes(status)) {
+            return (0, modules_1.handleResponse)(res, 400, false, `Cannot request return in "${status}" status.`);
+        }
+        // Check return window (24h from delivery for perishables, 7 days for normal items)
+        if (pt.deliveredAt) {
+            const hoursSinceDelivery = (Date.now() - pt.deliveredAt.getTime()) / (1000 * 60 * 60);
+            const maxReturnHours = 7 * 24; // 7 days default
+            if (hoursSinceDelivery > maxReturnHours) {
+                return (0, modules_1.handleResponse)(res, 400, false, 'Return window has expired (7 days after delivery).');
+            }
+        }
+        // Check if there's already a pending return request
+        const existingReturn = yield prisma_1.default.returnRequest.findFirst({
+            where: {
+                productTransactionId: pt.id,
+                status: enum_1.ReturnStatus.PENDING,
+            }
+        });
+        if (existingReturn) {
+            return (0, modules_1.handleResponse)(res, 400, false, 'A return request is already pending for this order.');
+        }
+        const returnRequest = yield prisma_1.default.returnRequest.create({
+            data: {
+                reason,
+                description,
+                evidence,
+                productTransactionId: pt.id,
+                buyerId: id,
+                sellerId: pt.sellerId,
+            }
+        });
+        // Update product transaction status
+        yield prisma_1.default.productTransaction.update({
+            where: { id: pt.id },
+            data: { status: enum_1.ProductTransactionStatus.RETURN_REQUESTED }
+        });
+        // Notify seller
+        yield notification_1.NotificationService.create({
+            userId: pt.sellerId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Return Request Received',
+            message: `Buyer ${(_a = pt.buyer.profile) === null || _a === void 0 ? void 0 : _a.firstName} has requested a return for "${pt.product.name}". Reason: ${reason}`,
+            data: { productTransactionId: pt.id, returnRequestId: returnRequest.id },
+        });
+        yield prisma_1.default.activity.create({
+            data: {
+                userId: id,
+                action: `Buyer requested return for order #${pt.id}. Reason: ${reason}`,
+                type: 'Return request',
+                status: 'act_pending',
+            }
+        });
+        return (0, modules_1.successResponse)(res, 'success', returnRequest);
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error creating return request');
+    }
+});
+exports.requestReturn = requestReturn;
+// ─────────────── Admin: Resolve Return Request ───────────────
+const resolveReturnRequest = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.user;
+    const { returnRequestId } = req.params;
+    const { resolution, adminNote } = req.body; // resolution: 'approve' | 'reject'
+    if (!resolution || !['approve', 'reject'].includes(resolution)) {
+        return (0, modules_1.handleResponse)(res, 400, false, 'Resolution must be "approve" or "reject"');
+    }
+    try {
+        const returnReq = yield prisma_1.default.returnRequest.findUnique({
+            where: { id: Number(returnRequestId) },
+            include: {
+                productTransaction: {
+                    include: {
+                        buyer: { include: { profile: true, wallet: true } },
+                        seller: { include: { profile: true } },
+                        product: true,
+                    }
+                }
+            }
+        });
+        if (!returnReq)
+            return (0, modules_1.handleResponse)(res, 404, false, 'Return request not found');
+        const pt = returnReq.productTransaction;
+        if (resolution === 'approve') {
+            // Approve return: refund buyer, restore stock
+            yield prisma_1.default.returnRequest.update({
+                where: { id: returnReq.id },
+                data: {
+                    status: enum_1.ReturnStatus.APPROVED,
+                    resolvedById: id,
+                    resolvedAt: new Date(),
+                    adminNote: adminNote || null,
+                }
+            });
+            yield prisma_1.default.productTransaction.update({
+                where: { id: pt.id },
+                data: { status: enum_1.ProductTransactionStatus.RETURNED }
+            });
+            // Restore stock
+            yield prisma_1.default.product.update({
+                where: { id: pt.productId },
+                data: { quantity: { increment: pt.quantity } }
+            });
+            // Refund buyer
+            if (pt.buyer.wallet) {
+                const refundAmount = Number(pt.price);
+                yield prisma_1.default.wallet.update({
+                    where: { id: pt.buyer.wallet.id },
+                    data: {
+                        previousBalance: pt.buyer.wallet.currentBalance,
+                        currentBalance: Number(pt.buyer.wallet.currentBalance) + refundAmount,
+                    }
+                });
+                const refundTx = yield prisma_1.default.transaction.create({
+                    data: {
+                        userId: pt.buyerId,
+                        amount: refundAmount,
+                        reference: (0, modules_1.randomId)(12),
+                        status: enum_1.TransactionStatus.SUCCESS,
+                        currency: 'NGN',
+                        timestamp: new Date(),
+                        description: 'return refund',
+                        productTransactionId: pt.id,
+                        type: enum_1.TransactionType.CREDIT,
+                    }
+                });
+                yield ledgerService_1.LedgerService.createEntry([
+                    {
+                        transactionId: refundTx.id,
+                        userId: pt.buyerId,
+                        amount: refundAmount,
+                        type: enum_1.TransactionType.DEBIT,
+                        account: enum_1.Accounts.PLATFORM_ESCROW,
+                        category: enum_1.EntryCategory.PRODUCT
+                    },
+                    {
+                        transactionId: refundTx.id,
+                        userId: pt.buyerId,
+                        amount: refundAmount,
+                        type: enum_1.TransactionType.CREDIT,
+                        account: enum_1.Accounts.USER_WALLET,
+                        category: enum_1.EntryCategory.PRODUCT
+                    }
+                ]);
+            }
+            yield notification_1.NotificationService.create({
+                userId: pt.buyerId,
+                type: enum_1.NotificationType.ORDER,
+                title: 'Return Approved',
+                message: `Your return request for "${pt.product.name}" has been approved. Refund has been processed.`,
+                data: { productTransactionId: pt.id },
+            });
+            yield notification_1.NotificationService.create({
+                userId: pt.sellerId,
+                type: enum_1.NotificationType.ORDER,
+                title: 'Return Approved by Admin',
+                message: `A return request for "${pt.product.name}" has been approved. Payment will not be released.`,
+                data: { productTransactionId: pt.id },
+            });
+        }
+        else {
+            // Reject return: continue normal flow, release payment if awaiting
+            yield prisma_1.default.returnRequest.update({
+                where: { id: returnReq.id },
+                data: {
+                    status: enum_1.ReturnStatus.REJECTED,
+                    resolvedById: id,
+                    resolvedAt: new Date(),
+                    adminNote: adminNote || null,
+                }
+            });
+            // If payment was on hold, release it now
+            if (pt.status === enum_1.ProductTransactionStatus.RETURN_REQUESTED) {
+                yield prisma_1.default.productTransaction.update({
+                    where: { id: pt.id },
+                    data: { status: enum_1.ProductTransactionStatus.AWAITING_CONFIRMATION }
+                });
+                yield (0, exports.releasePaymentToSeller)(pt.id);
+            }
+            yield notification_1.NotificationService.create({
+                userId: pt.buyerId,
+                type: enum_1.NotificationType.ORDER,
+                title: 'Return Request Rejected',
+                message: `Your return request for "${pt.product.name}" has been rejected. ${adminNote || ''}`,
+                data: { productTransactionId: pt.id },
+            });
+            yield notification_1.NotificationService.create({
+                userId: pt.sellerId,
+                type: enum_1.NotificationType.ORDER,
+                title: 'Return Rejected — Payment Released',
+                message: `Return request for "${pt.product.name}" was rejected. Payment has been released to your wallet.`,
+                data: { productTransactionId: pt.id },
+            });
+        }
+        return (0, modules_1.successResponse)(res, 'success', `Return request ${resolution}d successfully`);
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error resolving return request');
+    }
+});
+exports.resolveReturnRequest = resolveReturnRequest;
+// ═══════════════════════════════════════════════════════════════════════
+//  AUTO-RELEASE PAYMENTS (cron / admin endpoint)
+// ═══════════════════════════════════════════════════════════════════════
+const autoReleasePayments = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const now = new Date();
+        // Find all product transactions where autoReleaseAt has passed and payment not yet released
+        const pendingRelease = yield prisma_1.default.productTransaction.findMany({
+            where: {
+                status: { in: ['pt_awaiting_confirmation'] },
+                autoReleaseAt: { lte: now },
+                paymentReleasedAt: null,
+            }
+        });
+        if (pendingRelease.length === 0) {
+            return (0, modules_1.successResponse)(res, 'success', { released: 0 });
+        }
+        let releasedCount = 0;
+        for (const pt of pendingRelease) {
+            try {
+                yield (0, exports.releasePaymentToSeller)(pt.id);
+                releasedCount++;
+            }
+            catch (err) {
+                console.error(`Failed to auto-release payment for PT #${pt.id}:`, err);
+            }
+        }
+        return (0, modules_1.successResponse)(res, 'success', { released: releasedCount, total: pendingRelease.length });
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', 'Error auto-releasing payments');
+    }
+});
+exports.autoReleasePayments = autoReleasePayments;

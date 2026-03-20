@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uploadFile = exports.getPrevChats = exports.getMsgs = exports.joinRoom = exports.getContacts = exports.onDisconnect = exports.onConnect = exports.sendMessage = void 0;
+exports.uploadFile = exports.leaveRoom = exports.getPrevChats = exports.getMsgs = exports.joinRoom = exports.getContacts = exports.onDisconnect = exports.onConnect = exports.sendMessage = void 0;
 const events_1 = require("../../utils/events");
 const prisma_1 = __importDefault(require("../../config/prisma"));
 const modules_1 = require("../../utils/modules");
@@ -22,40 +22,66 @@ const enum_1 = require("../../utils/enum");
 const notification_1 = require("../../services/notification");
 const supabaseStorage_1 = require("../../services/supabaseStorage");
 const supabase_1 = require("../../config/supabase");
+/** Parse members string — handles both comma-separated and JSON array formats */
+const parseMembers = (members) => {
+    try {
+        const parsed = JSON.parse(members);
+        if (Array.isArray(parsed))
+            return parsed.map((m) => m.trim());
+    }
+    catch (_a) { }
+    return members.split(",").map(m => m.trim()).filter(Boolean);
+};
 const sendMessage = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
-    let room = yield prisma_1.default.chatRoom.findFirst({ where: { name: data.room } });
-    if (!room) {
-        return;
-    }
-    const message = yield prisma_1.default.message.create({
-        data: {
-            text: (0, cryptography_1.encryptMessage)(data.text),
-            from: data.from,
-            timestamp: new Date(),
-            chatroomId: room.id
+    try {
+        // Always use authenticated user id — never trust the client payload
+        const senderId = socket.user.id;
+        let room = yield prisma_1.default.chatRoom.findFirst({ where: { name: data.room } });
+        if (!room) {
+            return;
         }
-    });
-    let to = room.members.split(",").filter((member) => member !== data.from)[0];
-    let otherUser = yield prisma_1.default.user.findUnique({
-        where: { id: to },
-        include: { onlineUser: true }
-    });
-    if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
-        let user = yield prisma_1.default.user.findFirst({
-            where: { id: data.from },
-            include: { profile: true }
+        const message = yield prisma_1.default.message.create({
+            data: {
+                text: (0, cryptography_1.encryptMessage)(data.text),
+                from: senderId,
+                timestamp: new Date(),
+                chatroomId: room.id
+            }
         });
-        const senderName = `${(_a = user === null || user === void 0 ? void 0 : user.profile) === null || _a === void 0 ? void 0 : _a.firstName} ${(_b = user === null || user === void 0 ? void 0 : user.profile) === null || _b === void 0 ? void 0 : _b.lastName}`;
-        yield notification_1.NotificationService.create({
-            userId: to,
-            type: enum_1.NotificationType.CHAT,
-            title: `${senderName} sent you a message`,
-            message: data.text,
-            data: { type: 'chat', roomName: room.name, senderId: data.from, senderName },
+        const members = parseMembers(room.members);
+        let to = members.filter((member) => member !== senderId)[0];
+        if (!to)
+            return;
+        let otherUser = yield prisma_1.default.user.findUnique({
+            where: { id: to },
+            include: { onlineUser: true }
+        });
+        if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
+            let user = yield prisma_1.default.user.findFirst({
+                where: { id: senderId },
+                include: { profile: true }
+            });
+            const senderName = `${(_a = user === null || user === void 0 ? void 0 : user.profile) === null || _a === void 0 ? void 0 : _a.firstName} ${(_b = user === null || user === void 0 ? void 0 : user.profile) === null || _b === void 0 ? void 0 : _b.lastName}`;
+            yield notification_1.NotificationService.create({
+                userId: to,
+                type: enum_1.NotificationType.CHAT,
+                title: `${senderName} sent you a message`,
+                message: data.text,
+                data: { type: 'chat', roomName: room.name, senderId, senderName },
+            });
+        }
+        io.to(room.name).emit(events_1.Emit.RECV_MSG, {
+            from: senderId,
+            to,
+            text: data.text,
+            room: data.room,
+            timestamp: message.timestamp,
         });
     }
-    io.to(room.name).emit(events_1.Emit.RECV_MSG, Object.assign(Object.assign({}, data), { timestamp: message.timestamp }));
+    catch (error) {
+        console.error("sendMessage error:", error);
+    }
 });
 exports.sendMessage = sendMessage;
 const onConnect = (socket) => __awaiter(void 0, void 0, void 0, function* () {
@@ -106,106 +132,140 @@ const onDisconnect = (socket) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.onDisconnect = onDisconnect;
 const getContacts = (io, socket) => __awaiter(void 0, void 0, void 0, function* () {
-    const user = socket.user;
-    if (!user) {
-        return;
-    }
-    const contacts = yield prisma_1.default.user.findMany({
-        where: {
-            NOT: { id: user.id },
-        },
-        select: {
-            id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
-            profile: {
-                include: {
-                    professional: { include: { profession: true } }
-                }
-            },
-            location: true,
+    try {
+        const user = socket.user;
+        if (!user) {
+            return;
         }
-    });
-    socket.emit(events_1.Emit.ALL_CONTACTS, contacts);
+        const contacts = yield prisma_1.default.user.findMany({
+            where: {
+                NOT: { id: user.id },
+            },
+            select: {
+                id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
+                profile: {
+                    include: {
+                        professional: { include: { profession: true } }
+                    }
+                },
+                location: true,
+            }
+        });
+        socket.emit(events_1.Emit.ALL_CONTACTS, contacts);
+    }
+    catch (error) {
+        console.error("getContacts error:", error);
+        socket.emit(events_1.Emit.ALL_CONTACTS, []);
+    }
 });
 exports.getContacts = getContacts;
 const joinRoom = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
-    console.log("join room", data);
-    let room = yield prisma_1.default.chatRoom.findFirst({
-        where: {
-            AND: [
-                { members: { contains: socket.user.id } },
-                { members: { contains: data.contactId } }
-            ]
-        }
-    });
-    if (!room) {
-        room = yield prisma_1.default.chatRoom.create({
-            data: {
-                name: (0, modules_1.randomId)(12),
-                members: `${socket.user.id},${data.contactId}`
+    try {
+        console.log("join room", data);
+        let room = yield prisma_1.default.chatRoom.findFirst({
+            where: {
+                AND: [
+                    { members: { contains: socket.user.id } },
+                    { members: { contains: data.contactId } }
+                ]
             }
         });
-    }
-    const existingRoom = io.of("/").adapter.rooms.get(room.name);
-    if (!(existingRoom === null || existingRoom === void 0 ? void 0 : existingRoom.has(socket.id)))
-        socket.join(room.name);
-    const onlineUser = yield prisma_1.default.onlineUser.findFirst({
-        where: { userId: data.contactId }
-    });
-    if (onlineUser) {
-        const sid = onlineUser.socketId;
-        if (sid && !(existingRoom === null || existingRoom === void 0 ? void 0 : existingRoom.has(sid))) {
-            const userSocket = io.sockets.sockets.get(sid);
-            userSocket === null || userSocket === void 0 ? void 0 : userSocket.join(room.name);
+        if (!room) {
+            room = yield prisma_1.default.chatRoom.create({
+                data: {
+                    name: (0, modules_1.randomId)(12),
+                    members: `${socket.user.id},${data.contactId}`
+                }
+            });
         }
+        const existingRoom = io.of("/").adapter.rooms.get(room.name);
+        if (!(existingRoom === null || existingRoom === void 0 ? void 0 : existingRoom.has(socket.id)))
+            socket.join(room.name);
+        const onlineUser = yield prisma_1.default.onlineUser.findFirst({
+            where: { userId: data.contactId }
+        });
+        if (onlineUser) {
+            const sid = onlineUser.socketId;
+            if (sid && !(existingRoom === null || existingRoom === void 0 ? void 0 : existingRoom.has(sid))) {
+                const userSocket = io.sockets.sockets.get(sid);
+                userSocket === null || userSocket === void 0 ? void 0 : userSocket.join(room.name);
+            }
+        }
+        socket.emit(events_1.Emit.JOINED_ROOM, room.name);
+        console.log("joined room", room.name);
     }
-    io.to(room.name).emit(events_1.Emit.JOINED_ROOM, room.name);
-    console.log("joined room", room.name);
+    catch (error) {
+        console.error("joinRoom error:", error);
+    }
 });
 exports.joinRoom = joinRoom;
 const getMsgs = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
-    const chatroom = yield prisma_1.default.chatRoom.findFirst({
-        where: { name: data.room },
-        include: { messages: true }
-    });
-    const members = chatroom === null || chatroom === void 0 ? void 0 : chatroom.members.split(",");
-    const normalizedMessages = [];
-    chatroom === null || chatroom === void 0 ? void 0 : chatroom.messages.forEach((msg) => {
-        normalizedMessages.push({
-            to: members === null || members === void 0 ? void 0 : members.filter((member) => member !== msg.from)[0],
+    try {
+        const chatroom = yield prisma_1.default.chatRoom.findFirst({
+            where: { name: data.room },
+            include: { messages: true }
+        });
+        if (!chatroom)
+            return;
+        const members = parseMembers(chatroom.members);
+        // Sort by timestamp ascending so oldest messages come first
+        const sorted = [...chatroom.messages].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        const normalizedMessages = sorted.map((msg) => ({
+            to: members.filter((member) => member !== msg.from)[0],
             from: msg.from,
             text: (0, cryptography_1.decryptMessage)(msg.text),
+            room: data.room,
             timestamp: msg.timestamp,
-        });
-    });
-    io.to(data.room).emit(events_1.Emit.RECV_MSGs, normalizedMessages);
+        }));
+        socket.emit(events_1.Emit.RECV_MSGs, normalizedMessages);
+    }
+    catch (error) {
+        console.error("getMsgs error:", error);
+        socket.emit(events_1.Emit.RECV_MSGs, []);
+    }
 });
 exports.getMsgs = getMsgs;
 const getPrevChats = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
-    const chatrooms = yield prisma_1.default.chatRoom.findMany({
-        where: { members: { contains: socket.user.id } }
-    });
-    const partners = chatrooms.map((room) => {
-        const members = room.members.split(",");
-        return members.filter((member) => member !== socket.user.id)[0];
-    });
-    const prevChats = yield prisma_1.default.user.findMany({
-        where: { id: { in: partners } },
-        select: {
-            id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
-            profile: {
-                include: {
-                    professional: { include: { profession: true } }
-                }
-            },
-            location: true,
-            onlineUser: true,
-        }
-    });
-    socket.emit(events_1.Emit.GOT_PREV_CHATS, prevChats);
+    try {
+        const chatrooms = yield prisma_1.default.chatRoom.findMany({
+            where: { members: { contains: socket.user.id } }
+        });
+        const partners = chatrooms.map((room) => {
+            const members = parseMembers(room.members);
+            return members.filter((member) => member !== socket.user.id)[0];
+        }).filter(Boolean);
+        const prevChats = yield prisma_1.default.user.findMany({
+            where: { id: { in: partners } },
+            select: {
+                id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
+                profile: {
+                    include: {
+                        professional: { include: { profession: true } }
+                    }
+                },
+                location: true,
+                onlineUser: true,
+            }
+        });
+        socket.emit(events_1.Emit.GOT_PREV_CHATS, prevChats);
+    }
+    catch (error) {
+        console.error("getPrevChats error:", error);
+        socket.emit(events_1.Emit.GOT_PREV_CHATS, []);
+    }
 });
 exports.getPrevChats = getPrevChats;
+const leaveRoom = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
+    if (data === null || data === void 0 ? void 0 : data.room) {
+        socket.leave(data.room);
+        console.log(`User ${socket.user.id} left room ${data.room}`);
+    }
+});
+exports.leaveRoom = leaveRoom;
 const uploadFile = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
+    // Always use authenticated user id
+    const senderId = socket.user.id;
     const { image, fileName } = data;
     const fileExt = path_1.default.extname(fileName).toLowerCase();
     const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
@@ -236,20 +296,23 @@ const uploadFile = (io, socket, data) => __awaiter(void 0, void 0, void 0, funct
         const message = yield prisma_1.default.message.create({
             data: {
                 text: (0, cryptography_1.encryptMessage)(url),
-                from: data.from,
+                from: senderId,
                 timestamp: new Date(),
                 chatroomId: room.id
             }
         });
         // Send push notification to offline recipient
-        let to = room.members.split(",").filter((member) => member !== data.from)[0];
+        const fileMembers = parseMembers(room.members);
+        let to = fileMembers.filter((member) => member !== senderId)[0];
+        if (!to)
+            return;
         let otherUser = yield prisma_1.default.user.findUnique({
             where: { id: to },
             include: { onlineUser: true }
         });
         if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
             let sender = yield prisma_1.default.user.findFirst({
-                where: { id: data.from },
+                where: { id: senderId },
                 include: { profile: true }
             });
             const fileLabel = tag === '<img>' ? 'an image' : 'a file';
@@ -259,10 +322,16 @@ const uploadFile = (io, socket, data) => __awaiter(void 0, void 0, void 0, funct
                 type: enum_1.NotificationType.CHAT,
                 title: `${senderName} sent ${fileLabel}`,
                 message: `You received ${fileLabel} in chat`,
-                data: { type: 'chat', roomName: room.name, senderId: data.from, senderName },
+                data: { type: 'chat', roomName: room.name, senderId, senderName },
             });
         }
-        io.to(room.name).emit(events_1.Emit.RECV_FILE, Object.assign(Object.assign({}, message), { text: url }));
+        io.to(room.name).emit(events_1.Emit.RECV_FILE, {
+            from: senderId,
+            to,
+            text: url,
+            room: room.name,
+            timestamp: message.timestamp,
+        });
     }
     catch (err) {
         console.error("Error uploading chat file to Supabase:", err);

@@ -27,6 +27,7 @@ const chat_1 = require("../chat");
 const events_1 = require("../utils/events");
 const ledgerService_1 = require("../services/ledgerService");
 const CommissionService_1 = require("../services/CommissionService");
+const jobHook_1 = require("../hooks/jobHook");
 const testApi = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     return (0, modules_1.successResponse)(res, "success", "Your Api is working!");
 });
@@ -199,6 +200,7 @@ const createJobOrder = (req, res) => __awaiter(void 0, void 0, void 0, function*
             status: enum_1.ActivityStatus.ACT_SUCCESS
         }
     });
+    (0, jobHook_1.onJobCreate)({ clientId: id, professionalId: validatedData.professionalId }).catch(console.error);
     return (0, modules_1.successResponse)(res, "Successful", { jobResponse: job, emailSendId: emailResponse.success });
 });
 exports.createJobOrder = createJobOrder;
@@ -286,6 +288,7 @@ const cancelJob = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         if (onlineUser === null || onlineUser === void 0 ? void 0 : onlineUser.isOnline) {
             io.to(onlineUser.socketId).emit(events_1.Emit.JOB_CANCELLED, { text: 'Your job has been cancelled by client', data: job });
         }
+        (0, jobHook_1.onJobStatusUpdate)({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
         return (0, modules_1.successResponse)(res, 'success', "Job cancelled successfully");
     }
     catch (error) {
@@ -342,6 +345,7 @@ const respondToJob = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         if (onlineUser === null || onlineUser === void 0 ? void 0 : onlineUser.isOnline) {
             io.to(onlineUser.socketId).emit(events_1.Emit.JOB_RESPONSE, { text: `$Your Job has been ${accepted ? 'accepted' : 'rejected'}`, data: job });
         }
+        (0, jobHook_1.onJobStatusUpdate)({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
         return (0, modules_1.successResponse)(res, 'success', { message: 'Job respsonse updated', emailSendstatus: Boolean(emailResponse.messageId) });
     }
     catch (error) {
@@ -559,6 +563,7 @@ const completeJob = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 status: enum_1.ActivityStatus.ACT_SUCCESS
             }
         });
+        (0, jobHook_1.onJobStatusUpdate)({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
         return (0, modules_1.successResponse)(res, 'success', { message: 'Job completed sucessfully', emailSendStatus: emailResponse.success });
     }
     catch (error) {
@@ -672,6 +677,7 @@ const approveJob = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 status: enum_1.ActivityStatus.ACT_SUCCESS
             }
         });
+        (0, jobHook_1.onJobStatusUpdate)({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
         return (0, modules_1.successResponse)(res, 'success', { message: 'Job approved sucessfully' });
     }
     catch (error) {
@@ -741,6 +747,7 @@ const disputeJob = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 status: enum_1.ActivityStatus.ACT_SUCCESS
             }
         });
+        (0, jobHook_1.onJobStatusUpdate)({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
         return (0, modules_1.successResponse)(res, 'success', { dispute, emailSendStatus: emailResponse.success });
     }
     catch (error) {

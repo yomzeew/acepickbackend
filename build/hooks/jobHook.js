@@ -30,7 +30,7 @@ const onJobStatusUpdate = (job) => __awaiter(void 0, void 0, void 0, function* (
                     totalJobs: yield prisma_1.default.job.count({ where: { clientId: job.clientId } }),
                     totalJobsPending: yield prisma_1.default.job.count({ where: { clientId: job.clientId, status: enum_1.JobStatus.PENDING } }),
                     totalJobsOngoing: yield prisma_1.default.job.count({ where: { clientId: job.clientId, status: enum_1.JobStatus.ONGOING } }),
-                    totalJobsDeclined: yield prisma_1.default.job.count({ where: { clientId: job.clientId, status: enum_1.JobStatus.DECLINED } }),
+                    totalJobsDeclined: yield prisma_1.default.job.count({ where: { clientId: job.clientId, status: enum_1.JobStatus.REJECTED } }),
                     totalJobsCompleted: yield prisma_1.default.job.count({ where: { clientId: job.clientId, status: enum_1.JobStatus.COMPLETED } }),
                     totalJobsApproved: yield prisma_1.default.job.count({ where: { clientId: job.clientId, status: enum_1.JobStatus.APPROVED } }),
                     totalJobsCanceled: yield prisma_1.default.job.count({ where: { clientId: job.clientId, status: enum_1.JobStatus.CANCELLED } }),
@@ -48,7 +48,7 @@ const onJobStatusUpdate = (job) => __awaiter(void 0, void 0, void 0, function* (
                     totalJobs: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId } }),
                     totalJobsPending: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.PENDING } }),
                     totalJobsOngoing: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.ONGOING } }),
-                    totalJobsDeclined: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.DECLINED } }),
+                    totalJobsDeclined: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.REJECTED } }),
                     totalJobsCompleted: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.COMPLETED } }),
                     totalJobsApproved: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.APPROVED } }),
                     totalJobsCanceled: yield prisma_1.default.job.count({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.CANCELLED } }),
@@ -60,7 +60,7 @@ const onJobStatusUpdate = (job) => __awaiter(void 0, void 0, void 0, function* (
             const approvedSum = yield prisma_1.default.job.aggregate({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.APPROVED }, _sum: { workmanship: true } });
             const completedSum = yield prisma_1.default.job.aggregate({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.COMPLETED }, _sum: { workmanship: true } });
             const pendingSum = yield prisma_1.default.job.aggregate({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.PENDING }, _sum: { workmanship: true } });
-            const declinedSum = yield prisma_1.default.job.aggregate({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.DECLINED }, _sum: { workmanship: true } });
+            const declinedSum = yield prisma_1.default.job.aggregate({ where: { professionalId: job.professionalId, status: enum_1.JobStatus.REJECTED }, _sum: { workmanship: true } });
             yield prisma_1.default.professional.update({
                 where: { id: professional.id },
                 data: {

@@ -36,6 +36,7 @@ const enum_2 = require("../utils/enum");
 const zod_1 = __importDefault(require("zod"));
 const ledgerService_1 = require("../services/ledgerService");
 const order_1 = require("./order");
+const jobHook_1 = require("../hooks/jobHook");
 const createWallet = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.user;
     const { currency = 'NGN' } = req.body;
@@ -178,6 +179,7 @@ const debitWallet = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             message: `Your job "${job.title}" has been paid`,
             data: { jobId: job.id },
         });
+        (0, jobHook_1.onJobStatusUpdate)({ clientId: job.clientId, professionalId: job.professionalId }).catch(console.error);
         return (0, modules_1.successResponse)(res, 'success', transaction);
     }
     catch (error) {

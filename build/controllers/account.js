@@ -84,6 +84,7 @@ const getAccounts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 });
 exports.getAccounts = getAccounts;
 const resolveAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     const result = body_1.resolveBankSchema.safeParse(req.body);
     if (!result.success) {
         return res.status(400).json({
@@ -93,13 +94,21 @@ const resolveAccount = (req, res) => __awaiter(void 0, void 0, void 0, function*
         });
     }
     const { accountNumber, bankCode } = result.data;
-    const response = yield axios_1.default.get(` https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
-        headers: {
-            Authorization: `Bearer ${configSetup_1.default.PAYSTACK_SECRET_KEY}`,
-            'Content-Type': 'application/json',
-        },
-    });
-    return (0, modules_1.successResponse)(res, 'success', response.data);
+    try {
+        console.log('🏦 resolveAccount called:', { accountNumber, bankCode, hasKey: !!configSetup_1.default.PAYSTACK_SECRET_KEY });
+        const response = yield axios_1.default.get(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
+            headers: {
+                Authorization: `Bearer ${configSetup_1.default.PAYSTACK_SECRET_KEY}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        console.log('🏦 resolveAccount success:', JSON.stringify(response.data).substring(0, 200));
+        return (0, modules_1.successResponse)(res, 'success', response.data);
+    }
+    catch (error) {
+        console.error('🏦 resolveAccount error:', ((_a = error === null || error === void 0 ? void 0 : error.response) === null || _a === void 0 ? void 0 : _a.data) || (error === null || error === void 0 ? void 0 : error.message));
+        return (0, modules_1.errorResponse)(res, ((_c = (_b = error === null || error === void 0 ? void 0 : error.response) === null || _b === void 0 ? void 0 : _b.data) === null || _c === void 0 ? void 0 : _c.message) || 'Failed to resolve account', error === null || error === void 0 ? void 0 : error.message);
+    }
 });
 exports.resolveAccount = resolveAccount;
 const updateAccount = (req, res) => __awaiter(void 0, void 0, void 0, function* () {

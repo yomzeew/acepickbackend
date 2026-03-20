@@ -681,6 +681,7 @@ async function main() {
             approved: true,
             categoryId: catHealthProducts.id,
             userId: client2.id,
+            locationId: (await prisma.location.findFirst({ where: { userId: client2.id } }))!.id,
         }
     });
 

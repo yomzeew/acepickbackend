@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteReview = exports.editReview = exports.giveReview = void 0;
+exports.deleteReview = exports.getReviewsForUser = exports.getMyReviews = exports.editReview = exports.giveReview = void 0;
 const body_1 = require("../validation/body");
 const prisma_1 = __importDefault(require("../config/prisma"));
 const enum_1 = require("../utils/enum");
@@ -129,6 +129,114 @@ const editReview = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.editReview = editReview;
+// Get reviews received by the authenticated user (as a professional/delivery)
+const getMyReviews = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { id } = req.user;
+        const reviews = yield prisma_1.default.review.findMany({
+            where: { professionalUserId: id },
+            include: {
+                clientUser: {
+                    include: {
+                        profile: { select: { firstName: true, lastName: true, avatar: true } }
+                    }
+                },
+                job: { select: { id: true, title: true, description: true } },
+                order: { select: { id: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        // For each review, fetch the associated rating (same job/order + client)
+        const reviewsWithRatings = yield Promise.all(reviews.map((review) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b, _c, _d;
+            const rating = yield prisma_1.default.rating.findFirst({
+                where: Object.assign(Object.assign({ professionalUserId: id, clientUserId: review.clientUserId }, (review.jobId ? { jobId: review.jobId } : {})), (review.orderId ? { orderId: review.orderId } : {})),
+            });
+            return {
+                id: review.id.toString(),
+                text: review.text,
+                rating: (_a = rating === null || rating === void 0 ? void 0 : rating.value) !== null && _a !== void 0 ? _a : null,
+                createdAt: review.createdAt,
+                jobTitle: (_c = (_b = review.job) === null || _b === void 0 ? void 0 : _b.title) !== null && _c !== void 0 ? _c : null,
+                jobId: review.jobId,
+                orderId: review.orderId,
+                reviewer: ((_d = review.clientUser) === null || _d === void 0 ? void 0 : _d.profile) ? {
+                    firstName: review.clientUser.profile.firstName,
+                    lastName: review.clientUser.profile.lastName,
+                    avatar: review.clientUser.profile.avatar,
+                } : null,
+            };
+        })));
+        // Calculate stats
+        const ratingsOnly = reviewsWithRatings.filter(r => r.rating !== null).map(r => r.rating);
+        const averageRating = ratingsOnly.length > 0
+            ? ratingsOnly.reduce((a, b) => a + b, 0) / ratingsOnly.length
+            : 0;
+        return (0, modules_1.successResponse)(res, 'success', {
+            reviews: reviewsWithRatings,
+            total: reviewsWithRatings.length,
+            averageRating: Math.round(averageRating * 10) / 10,
+        });
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', "Internal server error");
+    }
+});
+exports.getMyReviews = getMyReviews;
+// Get reviews received by a specific user (public)
+const getReviewsForUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { userId } = req.params;
+        const reviews = yield prisma_1.default.review.findMany({
+            where: { professionalUserId: userId },
+            include: {
+                clientUser: {
+                    include: {
+                        profile: { select: { firstName: true, lastName: true, avatar: true } }
+                    }
+                },
+                job: { select: { id: true, title: true, description: true } },
+                order: { select: { id: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        const reviewsWithRatings = yield Promise.all(reviews.map((review) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b, _c, _d;
+            const rating = yield prisma_1.default.rating.findFirst({
+                where: Object.assign(Object.assign({ professionalUserId: userId, clientUserId: review.clientUserId }, (review.jobId ? { jobId: review.jobId } : {})), (review.orderId ? { orderId: review.orderId } : {})),
+            });
+            return {
+                id: review.id.toString(),
+                text: review.text,
+                rating: (_a = rating === null || rating === void 0 ? void 0 : rating.value) !== null && _a !== void 0 ? _a : null,
+                createdAt: review.createdAt,
+                jobTitle: (_c = (_b = review.job) === null || _b === void 0 ? void 0 : _b.title) !== null && _c !== void 0 ? _c : null,
+                jobId: review.jobId,
+                orderId: review.orderId,
+                reviewer: ((_d = review.clientUser) === null || _d === void 0 ? void 0 : _d.profile) ? {
+                    firstName: review.clientUser.profile.firstName,
+                    lastName: review.clientUser.profile.lastName,
+                    avatar: review.clientUser.profile.avatar,
+                } : null,
+            };
+        })));
+        const ratingsOnly = reviewsWithRatings.filter(r => r.rating !== null).map(r => r.rating);
+        const averageRating = ratingsOnly.length > 0
+            ? ratingsOnly.reduce((a, b) => a + b, 0) / ratingsOnly.length
+            : 0;
+        return (0, modules_1.successResponse)(res, 'success', {
+            reviews: reviewsWithRatings,
+            total: reviewsWithRatings.length,
+            averageRating: Math.round(averageRating * 10) / 10,
+        });
+    }
+    catch (error) {
+        console.log(error);
+        return (0, modules_1.errorResponse)(res, 'error', "Internal server error");
+    }
+});
+exports.getReviewsForUser = getReviewsForUser;
 const deleteReview = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { reviewId } = req.params;

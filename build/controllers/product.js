@@ -219,35 +219,62 @@ const restockProduct = (req, res) => __awaiter(void 0, void 0, void 0, function*
 });
 exports.restockProduct = restockProduct;
 const selectProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    let productId, quantity, orderMethod;
     try {
         const result = body_1.selectProductSchema.safeParse(req.body);
         if (!result.success) {
             return res.status(400).json({ error: result.error.format() });
         }
-        const { productId, quantity, orderMethod } = result.data;
-        const product = yield prisma_1.default.product.findUnique({ where: { id: productId } });
-        if (!product) {
-            return res.status(404).json({ error: 'Product not found' });
-        }
-        if (product.quantity < quantity) {
-            return res.status(400).json({ error: 'Product quantity is not enough' });
-        }
-        const price = new library_1.Decimal(product.price).mul(quantity).sub(new library_1.Decimal(product.discount || 0).mul(quantity));
-        const productTransaction = yield prisma_1.default.productTransaction.create({
-            data: {
-                productId,
-                quantity,
-                buyerId: req.user.id,
-                sellerId: product.userId,
-                price,
-                orderMethod: orderMethod,
-                date: new Date()
+        ({ productId, quantity, orderMethod } = result.data);
+        // Use transaction to prevent race conditions and ensure stock reservation
+        const resultTransaction = yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            // Lock and check product stock
+            const product = yield tx.product.findUnique({
+                where: { id: productId },
+                select: { id: true, quantity: true, userId: true, price: true, discount: true }
+            });
+            if (!product) {
+                throw new Error('Product not found');
             }
-        });
-        return (0, modules_1.successResponse)(res, 'success', productTransaction);
+            if (product.quantity < quantity) {
+                throw new Error('Product quantity is not enough');
+            }
+            // Reserve stock by reducing available quantity
+            const updatedProduct = yield tx.product.update({
+                where: { id: productId },
+                data: {
+                    quantity: { decrement: quantity }
+                }
+            });
+            // Calculate price
+            const price = new library_1.Decimal(updatedProduct.price).mul(quantity).sub(new library_1.Decimal(updatedProduct.discount || 0).mul(quantity));
+            // Create product transaction
+            const productTransaction = yield tx.productTransaction.create({
+                data: {
+                    productId,
+                    quantity,
+                    buyerId: req.user.id,
+                    sellerId: product.userId,
+                    price,
+                    orderMethod: orderMethod,
+                    date: new Date()
+                }
+            });
+            return { productTransaction, remainingStock: updatedProduct.quantity };
+        }));
+        return (0, modules_1.successResponse)(res, 'success', Object.assign(Object.assign({}, resultTransaction.productTransaction), { remainingStock: resultTransaction.remainingStock }));
     }
     catch (error) {
-        return (0, modules_1.errorResponse)(res, 'error', error.message);
+        // If transaction fails, stock is automatically rolled back
+        console.error('selectProduct error:', {
+            error: error.message,
+            productId: productId || 'unknown',
+            quantity: quantity || 'unknown',
+            orderMethod: orderMethod || 'unknown',
+            userId: req.user.id,
+            timestamp: new Date().toISOString()
+        });
+        return (0, modules_1.errorResponse)(res, 'error', error.message || 'Failed to select product');
     }
 });
 exports.selectProduct = selectProduct;

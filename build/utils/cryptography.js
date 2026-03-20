@@ -16,9 +16,15 @@ const encryptMessage = (message) => {
 };
 exports.encryptMessage = encryptMessage;
 const decryptMessage = (encryptedData) => {
-    const decipher = crypto_1.default.createDecipheriv("aes-256-cbc", SECRET_KEY, IV);
-    let decrypted = decipher.update(encryptedData, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-    return decrypted;
+    try {
+        const decipher = crypto_1.default.createDecipheriv("aes-256-cbc", SECRET_KEY, IV);
+        let decrypted = decipher.update(encryptedData, "hex", "utf8");
+        decrypted += decipher.final("utf8");
+        return decrypted;
+    }
+    catch (_a) {
+        // Message was stored as plain text or encrypted with a different key
+        return encryptedData;
+    }
 };
 exports.decryptMessage = decryptMessage;
