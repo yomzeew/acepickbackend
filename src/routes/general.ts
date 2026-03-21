@@ -29,6 +29,7 @@ import { giveRating, isRated } from "../controllers/rating";
 import { deleteReview, editReview, giveReview, getMyReviews, getReviewsForUser } from "../controllers/review";
 import { getClientDashboard, getProfessionalDashboard, getDeliveryDashboard } from "../controllers/dashboard";
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications } from "../controllers/notifications";
+import { getTurnCredentials } from "../controllers/turn";
 
 const routes = Router();
 
@@ -227,5 +228,8 @@ routes.delete('/notifications', deleteAllNotifications);
 
 // Order cleanup route (admin only or cron job)
 routes.post('/orders/cleanup-expired', allowRoles(UserRole.ADMIN), cleanupExpiredUnpaidOrders);
+
+// Cloudflare TURN credentials for WebRTC calls
+routes.get('/turn-credentials', getTurnCredentials);
 
 export default routes;

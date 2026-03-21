@@ -7,6 +7,21 @@ import fs from "fs";
 import { decryptMessage, encryptMessage } from "../../utils/cryptography";
 import { UserRole, NotificationType } from "../../utils/enum";
 import { NotificationService } from "../../services/notification";
+
+/** Returns the roles a given user role is allowed to chat with */
+const getAllowedChatRoles = (role: string): UserRole[] => {
+    switch (role) {
+        case UserRole.CLIENT:
+            return [UserRole.PROFESSIONAL, UserRole.DELIVERY];
+        case UserRole.PROFESSIONAL:
+            return [UserRole.CLIENT];
+        case UserRole.DELIVERY:
+            return [UserRole.CLIENT];
+        default:
+            // admins / superadmins can chat with anyone
+            return [UserRole.CLIENT, UserRole.PROFESSIONAL, UserRole.DELIVERY];
+    }
+};
 import { uploadFileToSupabase } from "../../services/supabaseStorage";
 import { BUCKET, FOLDERS } from "../../config/supabase";
 
@@ -55,6 +70,15 @@ export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage)
             where: { id: to },
             include: { onlineUser: true }
         })
+
+        // Enforce chat role restrictions
+        if (otherUser) {
+            const allowedRoles = getAllowedChatRoles(socket.user.role) as string[];
+            if (!allowedRoles.includes(otherUser.role)) {
+                console.warn(`Chat blocked: ${socket.user.role} cannot message ${otherUser.role}`);
+                return;
+            }
+        }
 
         if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
             let user = await prisma.user.findFirst({
@@ -145,9 +169,12 @@ export const getContacts = async (io: Server, socket: Socket) => {
             return
         }
 
+        const allowedRoles = getAllowedChatRoles(user.role);
+
         const contacts = await prisma.user.findMany({
             where: {
                 NOT: { id: user.id },
+                role: { in: allowedRoles },
             },
             select: {
                 id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
@@ -170,6 +197,16 @@ export const getContacts = async (io: Server, socket: Socket) => {
 export const joinRoom = async (io: Server, socket: Socket, data: any) => {
     try {
         console.log("join room", data);
+
+        // Enforce chat role restrictions before joining/creating a room
+        const otherUser = await prisma.user.findUnique({ where: { id: data.contactId } });
+        if (otherUser) {
+            const allowedRoles = getAllowedChatRoles(socket.user.role) as string[];
+            if (!allowedRoles.includes(otherUser.role)) {
+                console.warn(`Room blocked: ${socket.user.role} cannot chat with ${otherUser.role}`);
+                return;
+            }
+        }
 
         let room = await prisma.chatRoom.findFirst({
             where: {
@@ -248,6 +285,8 @@ export const getMsgs = async (io: Server, socket: Socket, data: any) => {
 
 export const getPrevChats = async (io: Server, socket: Socket, data: any) => {
     try {
+        const allowedRoles = getAllowedChatRoles(socket.user.role);
+
         const chatrooms = await prisma.chatRoom.findMany({
             where: { members: { contains: socket.user.id } }
         });
@@ -258,7 +297,10 @@ export const getPrevChats = async (io: Server, socket: Socket, data: any) => {
         }).filter(Boolean)
 
         const prevChats = await prisma.user.findMany({
-            where: { id: { in: partners } },
+            where: {
+                id: { in: partners },
+                role: { in: allowedRoles },
+            },
             select: {
                 id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
                 profile: {

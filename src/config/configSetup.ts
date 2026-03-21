@@ -42,6 +42,8 @@ type Config = {
     SUPABASE_URL: string | undefined;
     SUPABASE_ANON_KEY: string | undefined;
     SUPABASE_SERVICE_ROLE_KEY: string | undefined;
+    CLOUDFLARE_TURN_TOKEN_ID: string | undefined;
+    CLOUDFLARE_TURN_API_TOKEN: string | undefined;
 };
 
 const getConfig = (): Config => {
@@ -82,6 +84,8 @@ const getConfig = (): Config => {
         SUPABASE_URL: process.env.SUPABASE_URL,
         SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
         SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        CLOUDFLARE_TURN_TOKEN_ID: process.env.CLOUDFLARE_TURN_TOKEN_ID,
+        CLOUDFLARE_TURN_API_TOKEN: process.env.CLOUDFLARE_TURN_API_TOKEN,
         PUBLIC_ROUTES: [
             '/api',
             '/',

@@ -160,7 +160,7 @@ export const updateProfile = async (req: Request, res: Response) => {
 }
 
 export const getUsers = async (req: Request, res: Response) => {
-    const { id } = req.user;
+    const { id, role: userRole } = req.user;
 
     const result = getUsersQuerySchema.safeParse(req.query);
 
@@ -176,11 +176,26 @@ export const getUsers = async (req: Request, res: Response) => {
 
     const { search, professionId, page, limit, role } = result.data;
 
+    // Enforce chat role restrictions:
+    // Client → can see professional + delivery
+    // Professional → can see client only
+    // Delivery → can see client only
+    const allowedRolesMap: Record<string, string[]> = {
+        client: ['professional', 'delivery'],
+        professional: ['client'],
+        delivery: ['client'],
+    };
+    const allowedRoles = allowedRolesMap[userRole] || ['client', 'professional', 'delivery'];
+
+    // If a specific role filter is requested, validate it's in the allowed list
+    const effectiveRole = role
+        ? (allowedRoles.includes(role) ? role : '__none__')  // block disallowed role filter
+        : undefined;
 
     try {
         const contacts = await prisma.user.findMany({
             where: {
-                ...(role && { role: role as any }),
+                ...(effectiveRole ? { role: effectiveRole as any } : { role: { in: allowedRoles as any } }),
                 id: { not: id },
                 profile: search
                     ? {
