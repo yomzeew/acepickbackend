@@ -156,11 +156,14 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('video-call-user', async (data: any) => {
             try {
+                console.log(`[video-call-user] from=${socket.user.id} to=${data.to}`);
                 if (!data.to || typeof data.to !== 'string' || data.to.length === 0) {
+                    console.log(`[video-call-user] REJECTED: invalid data.to = ${JSON.stringify(data.to)}`);
                     socket.emit('call-unavailable', { to: data.to, reason: 'Invalid recipient' });
                     return;
                 }
                 const partner = await findOnlinePartner(data.to);
+                console.log(`[video-call-user] findOnlinePartner result:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : null);
                 if (partner) {
                     io.to(partner.socketId).emit('video-call-made', {
                         offer: data.offer,
