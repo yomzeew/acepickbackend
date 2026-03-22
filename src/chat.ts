@@ -54,6 +54,8 @@ export const initSocket = (httpServer: any) => {
                         title: `${callerName} is calling you`,
                         message: 'You have a missed voice call',
                         data: { type: 'call', callType: 'voice', callerId: socket.user.id, callerName },
+                        channelId: 'calls',
+                        priority: 'high',
                     });
                 }
             } catch (error) {
@@ -130,6 +132,8 @@ export const initSocket = (httpServer: any) => {
                         title: `${callerName} is video calling you`,
                         message: 'You have a missed video call',
                         data: { type: 'call', callType: 'video', callerId: socket.user.id, callerName },
+                        channelId: 'calls',
+                        priority: 'high',
                     });
                 }
             } catch (error) {

@@ -11,6 +11,8 @@ export interface CreateNotificationParams {
     message: string;
     data?: Record<string, any>;
     sendPush?: boolean;  // default true
+    channelId?: string;  // Android notification channel (e.g. 'calls')
+    priority?: 'default' | 'normal' | 'high'; // push priority
 }
 
 // ─── Expo Push (low-level) ───────────────────────────────────
@@ -19,15 +21,18 @@ export async function sendPushNotification(
     expoPushToken: string,
     title: string,
     message: string,
-    data: any
+    data: any,
+    options?: { channelId?: string; priority?: 'default' | 'normal' | 'high' }
 ) {
     try {
-        const response = await axios.post('https://exp.host/--/api/v2/push/send', {
+        const response = await axios.post('https://exp.host/--/api/v2/push/send?useFcmV1=true', {
             to: expoPushToken,
             sound: 'default',
             title,
             body: message,
             data,
+            ...(options?.channelId && { channelId: options.channelId }),
+            ...(options?.priority && { priority: options.priority }),
         }, {
             headers: {
                 'Accept': 'application/json',
@@ -73,7 +78,7 @@ export async function sendBatchPushNotifications(
 
     for (const chunk of chunks) {
         try {
-            await axios.post('https://exp.host/--/api/v2/push/send', chunk, {
+            await axios.post('https://exp.host/--/api/v2/push/send?useFcmV1=true', chunk, {
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
@@ -92,7 +97,7 @@ export const NotificationService = {
      * Create an in-app notification and optionally send a push notification.
      */
     async create(params: CreateNotificationParams) {
-        const { userId, type, title, message, data, sendPush = true } = params;
+        const { userId, type, title, message, data, sendPush = true, channelId, priority } = params;
 
         // 1. Store in DB
         const notification = await prisma.notification.create({
@@ -119,7 +124,8 @@ export const NotificationService = {
                         user.fcmToken,
                         title,
                         message,
-                        { notificationId: notification.id, type, ...data }
+                        { notificationId: notification.id, type, ...data },
+                        { channelId, priority }
                     );
 
                     if (result?.status) {

@@ -709,6 +709,17 @@ const riderStatusTransition = async (
             });
         }
 
+        // Notify seller
+        if (order.productTransaction?.sellerId) {
+            await NotificationService.create({
+                userId: order.productTransaction.sellerId,
+                type: NotificationType.ORDER,
+                title: notifyBuyerTitle,
+                message: notifyBuyerMsg(order.id),
+                data: { orderId: order.id, status: toStatus },
+            });
+        }
+
         // Real-time socket to buyer & seller
         const io = getIO();
         for (const uid of [order.productTransaction?.buyerId, order.productTransaction?.sellerId].filter(Boolean)) {
@@ -1101,8 +1112,24 @@ export const cancelOrder = async (req: Request, res: Response) => {
 
         const updatedOrder = await prisma.order.update({
             where: { id: order.id },
-            data: { status: OrderStatus.CANCELLED as any }
+            data: { status: OrderStatus.CANCELLED as any },
+            include: { productTransaction: { select: { buyerId: true, sellerId: true } } }
         });
+
+        // Notify buyer and seller about cancellation
+        if (updatedOrder.productTransaction) {
+            const otherPartyId = updatedOrder.productTransaction.buyerId === id
+                ? updatedOrder.productTransaction.sellerId
+                : updatedOrder.productTransaction.buyerId;
+
+            await NotificationService.create({
+                userId: otherPartyId,
+                type: NotificationType.ORDER,
+                title: 'Order Cancelled',
+                message: `Order #${order.id} has been cancelled.`,
+                data: { orderId: order.id, status: OrderStatus.CANCELLED },
+            });
+        }
 
         return successResponse(res, 'success', updatedOrder);
     } catch (error) {
@@ -1211,6 +1238,15 @@ export const disputeOrder = async (req: Request, res: Response) => {
         partner?.profile?.firstName || 'User'
     )
 
+    // Push notification to seller
+    await NotificationService.create({
+        userId: partnerId || productTransaction.sellerId,
+        type: NotificationType.ORDER,
+        title: 'Order Disputed',
+        message: `${reporter?.profile?.firstName} has raised a dispute for order #${productTransaction.id}. Reason: ${reason}`,
+        data: { productTransactionId: productTransaction.id, disputeId: dispute.id },
+    });
+
     return successResponse(res, 'success', dispute);
 }
 
@@ -1260,6 +1296,26 @@ export const resolveDispute = async (req: Request, res: Response) => {
         emailMsg.body,
         'User'
     );
+
+    // Push notification to both parties
+    if (dispute.reporterId) {
+        await NotificationService.create({
+            userId: dispute.reporterId,
+            type: NotificationType.ORDER,
+            title: 'Dispute Resolved',
+            message: `Your dispute #${dispute.id} has been resolved by admin.`,
+            data: { disputeId: dispute.id },
+        });
+    }
+    if (dispute.partnerId) {
+        await NotificationService.create({
+            userId: dispute.partnerId,
+            type: NotificationType.ORDER,
+            title: 'Dispute Resolved',
+            message: `Dispute #${dispute.id} has been resolved by admin.`,
+            data: { disputeId: dispute.id },
+        });
+    }
 
     return successResponse(res, 'success', updatedDispute);
 }
