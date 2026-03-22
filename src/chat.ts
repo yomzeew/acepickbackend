@@ -24,16 +24,21 @@ export const initSocket = (httpServer: any) => {
     });
 
     // Attach Redis adapter for multi-instance Socket.IO scaling (only if Redis is configured)
-    if (config.REDIS_HOST || config.REDIS_INSTANCE_URL) {
+    if (config.REDIS_INSTANCE_URL || config.REDIS_HOST) {
         try {
-            const redisOptions = config.REDIS_INSTANCE_URL
-                ? config.REDIS_INSTANCE_URL
-                : {
+            let pubClient: Redis;
+            if (config.REDIS_INSTANCE_URL) {
+                const useTls = config.REDIS_INSTANCE_URL.startsWith('rediss://');
+                pubClient = new Redis(config.REDIS_INSTANCE_URL, {
+                    ...(useTls ? { tls: { rejectUnauthorized: false } } : {}),
+                });
+            } else {
+                pubClient = new Redis({
                     host: config.REDIS_HOST,
                     port: config.REDIS_PORT || 6379,
                     ...(config.REDIS_PASSWORD ? { password: config.REDIS_PASSWORD } : {}),
-                };
-            const pubClient = new Redis(redisOptions as any);
+                });
+            }
             const subClient = pubClient.duplicate();
             io.adapter(createAdapter(pubClient, subClient));
             console.log('✅ Socket.IO Redis adapter attached');
