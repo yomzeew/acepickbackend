@@ -42,7 +42,11 @@ export const login = async (req: Request, res: Response) => {
 
         const profile = await prisma.profile.findFirst({ where: { userId: user.id } })
 
-        if (profile) {
+        // Save fcmToken to both User (for push notifications) and Profile
+        if (fcmToken) {
+            await prisma.user.update({ where: { id: user.id }, data: { fcmToken } });
+        }
+        if (profile && fcmToken) {
             await prisma.profile.update({ where: { id: profile.id }, data: { fcmToken } })
         }
 

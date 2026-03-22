@@ -120,6 +120,7 @@ export const NotificationService = {
                 });
 
                 if (user?.fcmToken) {
+                    console.log(`[push] Sending to user=${userId} token=${user.fcmToken.substring(0, 20)}...`);
                     const result = await sendPushNotification(
                         user.fcmToken,
                         title,
@@ -127,6 +128,7 @@ export const NotificationService = {
                         { notificationId: notification.id, type, ...data },
                         { channelId, priority }
                     );
+                    console.log(`[push] Result:`, result);
 
                     if (result?.status) {
                         await prisma.notification.update({
@@ -134,6 +136,8 @@ export const NotificationService = {
                             data: { pushSent: true }
                         });
                     }
+                } else {
+                    console.warn(`[push] No fcmToken for user=${userId} — push skipped`);
                 }
             } catch (error) {
                 console.error('Push notification error (DB record still saved):', error);
