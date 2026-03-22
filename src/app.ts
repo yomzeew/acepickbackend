@@ -8,6 +8,7 @@ import redis from './config/redis';
 import cors from 'cors';
 import { logRoutes } from './middlewares/logRoutes';
 import { isAuthorized } from './middlewares/authorize';
+import { apiLimiter } from './middlewares/rateLimiter';
 import index from './routes/index';
 import auth from './routes/auth';
 import general from './routes/general';
@@ -116,9 +117,19 @@ app.get('/', (req: Request, res: Response) => {
     res.status(200).json({ message: 'Hello, world! This API is working!' });
 });
 
-app.get('/api/health', (req: Request, res: Response) => {
-    res.status(200).json({ status: true, message: 'Server is running' });
+app.get('/api/health', async (req: Request, res: Response) => {
+    let redisStatus = 'not configured';
+    if (redis) {
+        try {
+            const pong = await redis.ping();
+            redisStatus = pong === 'PONG' ? 'connected' : 'error';
+        } catch { redisStatus = 'disconnected'; }
+    }
+    res.status(200).json({ status: true, message: 'Server is running', redis: redisStatus });
 });
+
+// Global API rate limiter (100 req/min per IP)
+app.use('/api', apiLimiter);
 
 // Public routes (no authentication required)
 app.use("/api/public", publicRoutes);

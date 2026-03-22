@@ -1,13 +1,14 @@
 import { Request, Response } from "express";
 import prisma from '../config/prisma';
 import { successResponse, errorResponse, handleResponse } from "../utils/modules";
+import { CacheService } from "../services/cache";
 
 export const getSectors = async (req: Request, res: Response) => {
   try {
 
-    const sectors = await prisma.sector.findMany({
-      orderBy: { title: 'asc' },
-    });
+    const sectors = await CacheService.getOrSet('sectors:all', async () => {
+      return prisma.sector.findMany({ orderBy: { title: 'asc' } });
+    }, 600); // 10 min TTL
 
     return successResponse(res, 'success', sectors)
   } catch (error) {

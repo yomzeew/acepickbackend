@@ -30,6 +30,7 @@ import { deleteReview, editReview, giveReview, getMyReviews, getReviewsForUser }
 import { getClientDashboard, getProfessionalDashboard, getDeliveryDashboard } from "../controllers/dashboard";
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications } from "../controllers/notifications";
 import { getTurnCredentials } from "../controllers/turn";
+import { paymentLimiter, heavyLimiter } from "../middlewares/rateLimiter";
 
 const routes = Router();
 
@@ -135,9 +136,9 @@ routes.delete('/accounts/:recipientCode', allowRoles(UserRole.PROFESSIONAL, User
 
 routes.post('/create-wallet', /*allowRoles(UserRole.SEEKER),*/ createWallet);
 routes.get('/view-wallet', /*allowRoles(UserRole.SEEKER),*/ viewWallet);
-routes.post('/debit-wallet', /*allowRoles(UserRole.SEEKER),*/ debitWallet);
-routes.post('/debit-wallet/product', /*allowRoles(UserRole.SEEKER),*/ debitWalletForProductOrder);
-routes.post('/credit-wallet', /*allowRoles(UserRole.SEEKER),*/ creditWallet);
+routes.post('/debit-wallet', paymentLimiter, /*allowRoles(UserRole.SEEKER),*/ debitWallet);
+routes.post('/debit-wallet/product', paymentLimiter, /*allowRoles(UserRole.SEEKER),*/ debitWalletForProductOrder);
+routes.post('/credit-wallet', paymentLimiter, /*allowRoles(UserRole.SEEKER),*/ creditWallet);
 routes.post('/set-pin', /*allowRoles(UserRole.SEEKER),*/ setPin);
 routes.post('/reset-pin', resetPin);
 routes.post('/forgot-pin', forgotPin);
@@ -146,9 +147,9 @@ routes.get('/transactions', /*allowRoles(UserRole.SEEKER, UserRole.PROVIDER),*/ 
 routes.get('/transactions/:id', /*allowRoles(UserRole.SEEKER, UserRole.PROVIDER),*/ getTransactionById);
 
 routes.post('/paystack/webhook', handlePaystackWebhook);
-routes.post('/payments/initiate', /*allowRoles(UserRole.SEEKER),*/ initiatePayment);
+routes.post('/payments/initiate', paymentLimiter, /*allowRoles(UserRole.SEEKER),*/ initiatePayment);
 routes.post('/payments/verify/:ref', /*allowRoles(UserRole.SEEKER),*/ verifyPayment);
-routes.post('/transfer/initiate', /*allowRoles(UserRole.PROVIDER),*/ initiateTransfer);
+routes.post('/transfer/initiate', paymentLimiter, /*allowRoles(UserRole.PROVIDER),*/ initiateTransfer);
 routes.post('/transfer/finalize', finalizeTransfer);
 routes.post('/transfer/verify/:ref', verifyTransfer);
 

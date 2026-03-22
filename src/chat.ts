@@ -1,6 +1,9 @@
 import { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 import { socketAuthorize } from './middlewares/authorize';
 import prisma from './config/prisma';
+import config from './config/configSetup';
 import { Emit, Listen } from './utils/events';
 import { ChatMessage, getContacts, getMsgs, getPrevChats, joinRoom, leaveRoom, onConnect, onDisconnect, sendMessage, uploadFile } from './controllers/socket/chat';
 import { NotificationService } from './services/notification';
@@ -19,6 +22,27 @@ export const initSocket = (httpServer: any) => {
             origin: "*",
         }
     });
+
+    // Attach Redis adapter for multi-instance Socket.IO scaling (only if Redis is configured)
+    if (config.REDIS_HOST || config.REDIS_INSTANCE_URL) {
+        try {
+            const redisOptions = config.REDIS_INSTANCE_URL
+                ? config.REDIS_INSTANCE_URL
+                : {
+                    host: config.REDIS_HOST,
+                    port: config.REDIS_PORT || 6379,
+                    ...(config.REDIS_PASSWORD ? { password: config.REDIS_PASSWORD } : {}),
+                };
+            const pubClient = new Redis(redisOptions as any);
+            const subClient = pubClient.duplicate();
+            io.adapter(createAdapter(pubClient, subClient));
+            console.log('✅ Socket.IO Redis adapter attached');
+        } catch (error) {
+            console.warn('⚠️ Socket.IO Redis adapter failed, falling back to in-memory:', error);
+        }
+    } else {
+        console.log('ℹ️ Socket.IO using in-memory adapter (no Redis configured)');
+    }
 
     io.use(async (socket, next) => {
         console.log('Attempting to connect...')

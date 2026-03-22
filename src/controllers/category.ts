@@ -1,12 +1,13 @@
 import { Request, Response } from "express";
 import prisma from '../config/prisma';
 import { successResponse, errorResponse } from "../utils/modules";
+import { CacheService } from "../services/cache";
 
 export const getCategories = async (req: Request, res: Response) => {
     try {
-        const categories = await prisma.category.findMany({
-            orderBy: { name: 'asc' }
-        })
+        const categories = await CacheService.getOrSet('categories:all', async () => {
+            return prisma.category.findMany({ orderBy: { name: 'asc' } });
+        }, 600); // 10 min TTL
 
         return successResponse(res, 'success', categories);
     } catch (error) {
@@ -24,6 +25,7 @@ export const addCategory = async (req: Request, res: Response) => {
         }
 
         const newCategory = await prisma.category.create({ data: { name, description } });
+        await CacheService.invalidateCategories();
 
         return successResponse(res, 'Category added successfully', newCategory);
     } catch (error) {
@@ -49,6 +51,7 @@ export const updateCategory = async (req: Request, res: Response) => {
                 description: description || category.description,
             }
         });
+        await CacheService.invalidateCategories();
 
         return successResponse(res, 'Category updated successfully', updated);
     } catch (error) {
@@ -67,6 +70,7 @@ export const deleteCategory = async (req: Request, res: Response) => {
         }
 
         await prisma.category.delete({ where: { id: Number(id) } });
+        await CacheService.invalidateCategories();
 
         return successResponse(res, 'Category deleted successfully');
     } catch (error) {
