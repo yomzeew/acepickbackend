@@ -2,8 +2,6 @@ import { Request, Response } from "express";
 import config from "../config/configSetup";
 import { errorResponse, successResponse } from "../utils/modules";
 
-const CLOUDFLARE_TURN_URL = `https://rtc.live.cloudflare.com/v1/turn/keys/${config.CLOUDFLARE_TURN_TOKEN_ID}/credentials/generate-ice-servers`;
-
 /**
  * Generate short-lived Cloudflare TURN credentials for WebRTC calls.
  * Returns iceServers array ready to pass to RTCPeerConnection.
@@ -14,7 +12,8 @@ export const getTurnCredentials = async (_req: Request, res: Response) => {
             return errorResponse(res, "TURN server not configured");
         }
 
-        const response = await fetch(CLOUDFLARE_TURN_URL, {
+        const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${config.CLOUDFLARE_TURN_TOKEN_ID}/credentials/generate-ice-servers`;
+        const response = await fetch(url, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${config.CLOUDFLARE_TURN_API_TOKEN}`,

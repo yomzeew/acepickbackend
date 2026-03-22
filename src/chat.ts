@@ -36,6 +36,10 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('call-user', async (data: any) => {
             try {
+                if (!data.to || typeof data.to !== 'string' || data.to.length === 0) {
+                    socket.emit('call-unavailable', { to: data.to, reason: 'Invalid recipient' });
+                    return;
+                }
                 const partner = await findOnlinePartner(data.to);
                 if (partner) {
                     io.to(partner.socketId).emit('call-made', {
@@ -66,6 +70,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('make-answer', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('answer-made', {
@@ -79,6 +84,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('ice-candidate', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('ice-candidate', {
@@ -92,6 +98,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('end-call', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('call-ended', {
@@ -104,6 +111,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('reject-call', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('call-rejected', {
@@ -116,6 +124,10 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('video-call-user', async (data: any) => {
             try {
+                if (!data.to || typeof data.to !== 'string' || data.to.length === 0) {
+                    socket.emit('call-unavailable', { to: data.to, reason: 'Invalid recipient' });
+                    return;
+                }
                 const partner = await findOnlinePartner(data.to);
                 if (partner) {
                     io.to(partner.socketId).emit('video-call-made', {
@@ -144,6 +156,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('video-make-answer', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-answer-made', {
@@ -157,6 +170,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('video-ice-candidate', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-ice-candidate', {
@@ -170,6 +184,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('video-end-call', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-call-ended', {
@@ -182,6 +197,7 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('video-reject-call', async (data: any) => {
             try {
+                if (!data.to) return;
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-call-rejected', {
