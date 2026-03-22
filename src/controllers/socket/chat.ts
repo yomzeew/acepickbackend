@@ -80,10 +80,8 @@ export const sendMessage = async (io: Server, socket: Socket, data: ChatMessage)
             }
         }
 
-        const isRecipientOffline = !otherUser?.onlineUser || !otherUser.onlineUser.isOnline;
-        console.log(`[chat-notify] to=${to} onlineUser=${!!otherUser?.onlineUser} isOnline=${otherUser?.onlineUser?.isOnline} → willNotify=${isRecipientOffline}`);
-
-        if (otherUser && isRecipientOffline) {
+        // Always send push — on mobile the app may be backgrounded while socket is still alive
+        if (otherUser) {
             let user = await prisma.user.findFirst({
                 where: { id: senderId },
                 include: { profile: true }
