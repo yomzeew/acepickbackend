@@ -73,26 +73,26 @@ export const initSocket = (httpServer: any) => {
                 }
                 const partner = await findOnlinePartner(data.to);
                 console.log(`[call-user] findOnlinePartner result:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : null);
+                // Always send push — app may be backgrounded while socket is still alive
+                const caller = await prisma.user.findFirst({ where: { id: socket.user.id }, include: { profile: true } });
+                const callerName = `${caller?.profile?.firstName} ${caller?.profile?.lastName}`;
+                await NotificationService.create({
+                    userId: data.to,
+                    type: NotificationType.CHAT,
+                    title: `${callerName} is calling you`,
+                    message: 'You have a missed voice call',
+                    data: { type: 'call', callType: 'voice', callerId: socket.user.id, callerName },
+                    channelId: 'calls',
+                    priority: 'high',
+                });
+
                 if (partner) {
                     io.to(partner.socketId).emit('call-made', {
                         offer: data.offer,
                         from: socket.user.id,
                     });
                 } else {
-                    // Tell caller the partner is unavailable
                     socket.emit('call-unavailable', { to: data.to });
-                    // Recipient is offline — store + push notification
-                    const caller = await prisma.user.findFirst({ where: { id: socket.user.id }, include: { profile: true } });
-                    const callerName = `${caller?.profile?.firstName} ${caller?.profile?.lastName}`;
-                    await NotificationService.create({
-                        userId: data.to,
-                        type: NotificationType.CHAT,
-                        title: `${callerName} is calling you`,
-                        message: 'You have a missed voice call',
-                        data: { type: 'call', callType: 'voice', callerId: socket.user.id, callerName },
-                        channelId: 'calls',
-                        priority: 'high',
-                    });
                 }
             } catch (error) {
                 console.error('call-user error:', error);
@@ -164,6 +164,19 @@ export const initSocket = (httpServer: any) => {
                 }
                 const partner = await findOnlinePartner(data.to);
                 console.log(`[video-call-user] findOnlinePartner result:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : null);
+                // Always send push — app may be backgrounded while socket is still alive
+                const videoCaller = await prisma.user.findFirst({ where: { id: socket.user.id }, include: { profile: true } });
+                const videoCallerName = `${videoCaller?.profile?.firstName} ${videoCaller?.profile?.lastName}`;
+                await NotificationService.create({
+                    userId: data.to,
+                    type: NotificationType.CHAT,
+                    title: `${videoCallerName} is video calling you`,
+                    message: 'You have a missed video call',
+                    data: { type: 'call', callType: 'video', callerId: socket.user.id, callerName: videoCallerName },
+                    channelId: 'calls',
+                    priority: 'high',
+                });
+
                 if (partner) {
                     io.to(partner.socketId).emit('video-call-made', {
                         offer: data.offer,
@@ -171,17 +184,6 @@ export const initSocket = (httpServer: any) => {
                     });
                 } else {
                     socket.emit('call-unavailable', { to: data.to });
-                    const caller = await prisma.user.findFirst({ where: { id: socket.user.id }, include: { profile: true } });
-                    const callerName = `${caller?.profile?.firstName} ${caller?.profile?.lastName}`;
-                    await NotificationService.create({
-                        userId: data.to,
-                        type: NotificationType.CHAT,
-                        title: `${callerName} is video calling you`,
-                        message: 'You have a missed video call',
-                        data: { type: 'call', callType: 'video', callerId: socket.user.id, callerName },
-                        channelId: 'calls',
-                        priority: 'high',
-                    });
                 }
             } catch (error) {
                 console.error('video-call-user error:', error);
