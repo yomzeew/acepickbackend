@@ -13,6 +13,7 @@ export interface CreateNotificationParams {
     sendPush?: boolean;  // default true
     channelId?: string;  // Android notification channel (e.g. 'calls')
     priority?: 'default' | 'normal' | 'high'; // push priority
+    categoryId?: string; // Notification category for action buttons (e.g. 'INCOMING_CALL')
 }
 
 // ─── Expo Push (low-level) ───────────────────────────────────
@@ -22,7 +23,7 @@ export async function sendPushNotification(
     title: string,
     message: string,
     data: any,
-    options?: { channelId?: string; priority?: 'default' | 'normal' | 'high' }
+    options?: { channelId?: string; priority?: 'default' | 'normal' | 'high'; categoryId?: string }
 ) {
     try {
         const response = await axios.post('https://exp.host/--/api/v2/push/send?useFcmV1=true', {
@@ -33,6 +34,7 @@ export async function sendPushNotification(
             data,
             ...(options?.channelId && { channelId: options.channelId }),
             ...(options?.priority && { priority: options.priority }),
+            ...(options?.categoryId && { categoryId: options.categoryId }),
         }, {
             headers: {
                 'Accept': 'application/json',
@@ -97,7 +99,7 @@ export const NotificationService = {
      * Create an in-app notification and optionally send a push notification.
      */
     async create(params: CreateNotificationParams) {
-        const { userId, type, title, message, data, sendPush = true, channelId, priority } = params;
+        const { userId, type, title, message, data, sendPush = true, channelId, priority, categoryId } = params;
 
         // 1. Store in DB
         const notification = await prisma.notification.create({
@@ -126,7 +128,7 @@ export const NotificationService = {
                         title,
                         message,
                         { notificationId: notification.id, type, ...data },
-                        { channelId, priority }
+                        { channelId, priority, categoryId }
                     );
                     console.log(`[push] Result:`, result);
 

@@ -353,7 +353,9 @@ export const createOrder = async (req: Request, res: Response) => {
             type: NotificationType.ORDER,
             title: 'New Order',
             message: `${productTransaction.buyer.profile?.firstName} ordered ${productTransaction.quantity}x ${productTransaction.product.name}. Delivery requested.`,
-            data: { orderId: order.id, productTransactionId },
+            data: { type: 'ORDER', orderId: order.id, productTransactionId },
+            categoryId: 'NEW_ORDER',
+            priority: 'high',
         });
 
         return successResponse(res, 'success', {

@@ -80,10 +80,11 @@ export const initSocket = (httpServer: any) => {
                     userId: data.to,
                     type: NotificationType.CHAT,
                     title: `${callerName} is calling you`,
-                    message: 'You have a missed voice call',
+                    message: 'Incoming voice call',
                     data: { type: 'call', callType: 'voice', callerId: socket.user.id, callerName },
                     channelId: 'calls',
                     priority: 'high',
+                    categoryId: 'INCOMING_CALL',
                 });
 
                 if (partner) {
@@ -171,10 +172,11 @@ export const initSocket = (httpServer: any) => {
                     userId: data.to,
                     type: NotificationType.CHAT,
                     title: `${videoCallerName} is video calling you`,
-                    message: 'You have a missed video call',
+                    message: 'Incoming video call',
                     data: { type: 'call', callType: 'video', callerId: socket.user.id, callerName: videoCallerName },
                     channelId: 'calls',
                     priority: 'high',
+                    categoryId: 'INCOMING_CALL',
                 });
 
                 if (partner) {

@@ -222,7 +222,9 @@ export const createJobOrder = async (req: Request, res: Response) => {
         type: NotificationType.JOB,
         title: 'New Job Request',
         message: `You have a new job request: ${job.title}`,
-        data: { jobId: job.id },
+        data: { type: 'JOB', jobId: job.id },
+        categoryId: 'NEW_JOB',
+        priority: 'high',
     });
 
     let onlineUser = await prisma.onlineUser.findFirst({
