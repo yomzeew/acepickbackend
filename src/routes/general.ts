@@ -30,6 +30,7 @@ import { deleteReview, editReview, giveReview, getMyReviews, getReviewsForUser }
 import { getClientDashboard, getProfessionalDashboard, getDeliveryDashboard } from "../controllers/dashboard";
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications } from "../controllers/notifications";
 import { getTurnCredentials } from "../controllers/turn";
+import { saveCallRecording, getCallRecordings, deleteCallRecording } from "../controllers/callRecording";
 import { paymentLimiter, heavyLimiter } from "../middlewares/rateLimiter";
 
 const routes = Router();
@@ -127,12 +128,12 @@ routes.post('/locations', addLocation);
 routes.delete('/locations/:id', deleteLocation);
 
 
-routes.get('/accounts/banks', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT), getBanks);
-routes.post('/accounts', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT), addAccount);
-routes.get('/accounts', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT), getAccounts);
-routes.post('/accounts/resolve', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT), resolveAccount)
-routes.put('/accounts/:recipientCode', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT), updateAccount);
-routes.delete('/accounts/:recipientCode', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT), deleteAccount);
+routes.get('/accounts/banks', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT, UserRole.DELIVERY), getBanks);
+routes.post('/accounts', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT, UserRole.DELIVERY), addAccount);
+routes.get('/accounts', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT, UserRole.DELIVERY), getAccounts);
+routes.post('/accounts/resolve', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT, UserRole.DELIVERY), resolveAccount)
+routes.put('/accounts/:recipientCode', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT, UserRole.DELIVERY), updateAccount);
+routes.delete('/accounts/:recipientCode', allowRoles(UserRole.PROFESSIONAL, UserRole.CLIENT, UserRole.DELIVERY), deleteAccount);
 
 routes.post('/create-wallet', /*allowRoles(UserRole.SEEKER),*/ createWallet);
 routes.get('/view-wallet', /*allowRoles(UserRole.SEEKER),*/ viewWallet);
@@ -232,5 +233,10 @@ routes.post('/orders/cleanup-expired', allowRoles(UserRole.ADMIN), cleanupExpire
 
 // Cloudflare TURN credentials for WebRTC calls
 routes.get('/turn-credentials', getTurnCredentials);
+
+// Call recordings
+routes.post('/call-recordings', saveCallRecording);
+routes.get('/call-recordings', getCallRecordings);
+routes.delete('/call-recordings/:id', deleteCallRecording);
 
 export default routes;

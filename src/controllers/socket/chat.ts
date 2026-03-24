@@ -257,19 +257,25 @@ export const getMsgs = async (io: Server, socket: Socket, data: any) => {
     try {
         const chatroom = await prisma.chatRoom.findFirst({
             where: { name: data.room },
-            include: { messages: true }
         })
 
         if (!chatroom) return;
 
         const members = parseMembers(chatroom.members);
 
-        // Sort by timestamp ascending so oldest messages come first
-        const sorted = [...chatroom.messages].sort(
-            (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
+        // Build a where clause — if client sends `since` timestamp, only fetch newer messages
+        const messageWhere: any = { chatroomId: chatroom.id };
+        if (data.since) {
+            messageWhere.timestamp = { gt: new Date(data.since) };
+        }
 
-        const normalizedMessages: any[] = sorted.map((msg: any) => ({
+        const messages = await prisma.message.findMany({
+            where: messageWhere,
+            orderBy: { timestamp: 'asc' },
+            take: 500, // cap to avoid huge payloads
+        });
+
+        const normalizedMessages: any[] = messages.map((msg: any) => ({
             to: members.filter((member: string) => member !== msg.from)[0],
             from: msg.from,
             text: decryptMessage(msg.text),

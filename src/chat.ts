@@ -8,11 +8,105 @@ import { Emit, Listen } from './utils/events';
 import { ChatMessage, getContacts, getMsgs, getPrevChats, joinRoom, leaveRoom, onConnect, onDisconnect, sendMessage, uploadFile } from './controllers/socket/chat';
 import { NotificationService } from './services/notification';
 import { NotificationType } from './utils/enum';
+import { encryptMessage } from './utils/cryptography';
+import { randomId } from './utils/modules';
 
 let io: Server;
 
+const RING_TIMEOUT_MS = 60_000; // 1 minute
+
+// Track ringing calls: key = callerId, value = { timeout, receiverId, callType }
+interface RingingCall { timeout: NodeJS.Timeout; receiverId: string; callType: 'voice' | 'video'; }
+const ringingCalls = new Map<string, RingingCall>();
+
 const findOnlinePartner = async (userId: string) => {
     return prisma.onlineUser.findFirst({ where: { userId, isOnline: true } });
+};
+
+/** Find or create a chat room between two users and save a missed call message */
+const saveMissedCallMessage = async (callerId: string, receiverId: string, callType: 'voice' | 'video') => {
+    try {
+        // Find existing chat room
+        let room = await prisma.chatRoom.findFirst({
+            where: {
+                AND: [
+                    { members: { contains: callerId } },
+                    { members: { contains: receiverId } }
+                ]
+            }
+        });
+
+        // Create room if it doesn't exist
+        if (!room) {
+            room = await prisma.chatRoom.create({
+                data: {
+                    name: randomId(12),
+                    members: `${callerId},${receiverId}`
+                }
+            });
+        }
+
+        const msgText = `<missedcall>${callType}`;
+
+        const message = await prisma.message.create({
+            data: {
+                text: encryptMessage(msgText),
+                from: callerId,
+                timestamp: new Date(),
+                chatroomId: room.id
+            }
+        });
+
+        // Emit to room so both parties see it in real-time
+        io.to(room.name).emit(Emit.RECV_MSG, {
+            from: callerId,
+            to: receiverId,
+            text: msgText,
+            room: room.name,
+            timestamp: message.timestamp,
+        });
+
+        console.log(`[missed-call] ${callType} call from ${callerId} to ${receiverId} saved to room ${room.name}`);
+    } catch (error) {
+        console.error('[missed-call] Error saving missed call message:', error);
+    }
+};
+
+/** Start tracking a ringing call with 60s timeout */
+const startRingTimeout = (callerId: string, receiverId: string, callType: 'voice' | 'video') => {
+    // Clear any existing timeout for this caller
+    clearRingTimeout(callerId);
+
+    const timeout = setTimeout(async () => {
+        console.log(`[ring-timeout] ${callType} call from ${callerId} to ${receiverId} timed out after 60s`);
+        ringingCalls.delete(callerId);
+
+        // Notify caller
+        const callerOnline = await findOnlinePartner(callerId);
+        if (callerOnline) {
+            io.to(callerOnline.socketId).emit('call-timeout', { to: receiverId, callType });
+        }
+
+        // Notify receiver to stop ringing
+        const receiverOnline = await findOnlinePartner(receiverId);
+        if (receiverOnline) {
+            io.to(receiverOnline.socketId).emit(callType === 'video' ? 'video-call-ended' : 'call-ended', { from: callerId });
+        }
+
+        // Save missed call to chat
+        await saveMissedCallMessage(callerId, receiverId, callType);
+    }, RING_TIMEOUT_MS);
+
+    ringingCalls.set(callerId, { timeout, receiverId, callType });
+};
+
+/** Clear ringing timeout for a caller */
+const clearRingTimeout = (callerId: string) => {
+    const entry = ringingCalls.get(callerId);
+    if (entry) {
+        clearTimeout(entry.timeout);
+        ringingCalls.delete(callerId);
+    }
 };
 
 export const initSocket = (httpServer: any) => {
@@ -92,8 +186,12 @@ export const initSocket = (httpServer: any) => {
                         offer: data.offer,
                         from: socket.user.id,
                     });
+                    // Start 60s ring timeout
+                    startRingTimeout(socket.user.id, data.to, 'voice');
                 } else {
                     socket.emit('call-unavailable', { to: data.to });
+                    // User offline — save missed call immediately
+                    await saveMissedCallMessage(socket.user.id, data.to, 'voice');
                 }
             } catch (error) {
                 console.error('call-user error:', error);
@@ -104,6 +202,8 @@ export const initSocket = (httpServer: any) => {
         socket.on('make-answer', async (data: any) => {
             try {
                 if (!data.to) return;
+                // Call answered — clear the ring timeout
+                clearRingTimeout(data.to);
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('answer-made', {
@@ -132,6 +232,15 @@ export const initSocket = (httpServer: any) => {
         socket.on('end-call', async (data: any) => {
             try {
                 if (!data.to) return;
+                // Check if call was never answered (still ringing) — save missed call
+                const ringing = ringingCalls.get(socket.user.id);
+                if (ringing && ringing.receiverId === data.to) {
+                    clearRingTimeout(socket.user.id);
+                    await saveMissedCallMessage(socket.user.id, data.to, 'voice');
+                } else {
+                    clearRingTimeout(socket.user.id);
+                    clearRingTimeout(data.to);
+                }
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('call-ended', {
@@ -145,6 +254,9 @@ export const initSocket = (httpServer: any) => {
         socket.on('reject-call', async (data: any) => {
             try {
                 if (!data.to) return;
+                // Receiver rejected — clear timeout, save missed call
+                clearRingTimeout(data.to);
+                await saveMissedCallMessage(data.to, socket.user.id, 'voice');
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('call-rejected', {
@@ -184,8 +296,12 @@ export const initSocket = (httpServer: any) => {
                         offer: data.offer,
                         from: socket.user.id,
                     });
+                    // Start 60s ring timeout
+                    startRingTimeout(socket.user.id, data.to, 'video');
                 } else {
                     socket.emit('call-unavailable', { to: data.to });
+                    // User offline — save missed call immediately
+                    await saveMissedCallMessage(socket.user.id, data.to, 'video');
                 }
             } catch (error) {
                 console.error('video-call-user error:', error);
@@ -196,6 +312,8 @@ export const initSocket = (httpServer: any) => {
         socket.on('video-make-answer', async (data: any) => {
             try {
                 if (!data.to) return;
+                // Video call answered — clear the ring timeout
+                clearRingTimeout(data.to);
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-answer-made', {
@@ -224,6 +342,15 @@ export const initSocket = (httpServer: any) => {
         socket.on('video-end-call', async (data: any) => {
             try {
                 if (!data.to) return;
+                // Check if video call was never answered — save missed call
+                const ringing = ringingCalls.get(socket.user.id);
+                if (ringing && ringing.receiverId === data.to) {
+                    clearRingTimeout(socket.user.id);
+                    await saveMissedCallMessage(socket.user.id, data.to, 'video');
+                } else {
+                    clearRingTimeout(socket.user.id);
+                    clearRingTimeout(data.to);
+                }
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-call-ended', {
@@ -237,6 +364,9 @@ export const initSocket = (httpServer: any) => {
         socket.on('video-reject-call', async (data: any) => {
             try {
                 if (!data.to) return;
+                // Receiver rejected video — clear timeout, save missed call
+                clearRingTimeout(data.to);
+                await saveMissedCallMessage(data.to, socket.user.id, 'video');
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-call-rejected', {

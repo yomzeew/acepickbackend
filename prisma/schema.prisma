@@ -217,6 +217,8 @@ model User {
   adminResolvedReturns ReturnRequest[]     @relation("AdminResolvedReturns")
   ledgerEntries       LedgerEntry[]
   notifications       Notification[]
+  callerRecordings    CallRecording[]  @relation("CallerRecordings")
+  receiverRecordings  CallRecording[]  @relation("ReceiverRecordings")
 
   @@map("users")
 }
@@ -987,4 +989,26 @@ model Notification {
   @@index([userId, read])
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+// ──────────────────────────── CALL RECORDINGS ─────────────────────
+
+model CallRecording {
+  id          Int      @id @default(autoincrement())
+  callerId    String   @db.Uuid
+  receiverId  String   @db.Uuid
+  url         String   @db.Text          // Supabase public URL
+  path        String   @db.Text          // Supabase storage path (for deletion)
+  duration    Int      @default(0)       // duration in seconds
+  fileSize    Int?                        // file size in bytes
+  callType    String   @default("voice") @db.VarChar(10) // voice | video
+
+  caller      User     @relation("CallerRecordings", fields: [callerId], references: [id], onDelete: Cascade)
+  receiver    User     @relation("ReceiverRecordings", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+
+  @@index([callerId, createdAt])
+  @@index([receiverId, createdAt])
+  @@map("call_recordings")
 }

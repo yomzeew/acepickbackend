@@ -17,4 +17,5 @@ export const FOLDERS = {
   PORTFOLIOS: 'portfolios',
   GENERAL: 'general',
   CHAT: 'chat',
+  RECORDINGS: 'recordings',
 } as const;
