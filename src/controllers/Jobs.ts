@@ -169,7 +169,7 @@ export const getLatestJob = async (req: Request, res: Response) => {
                 accepted: false
             },
             orderBy: { createdAt: 'desc' },
-            include: { materials: true }
+            include: jobIncludeForRole(role)
         })
 
         if (!job) {
@@ -185,59 +185,17 @@ export const getLatestJob = async (req: Request, res: Response) => {
 
 export const getJobById = async (req: Request, res: Response) => {
     let { id } = req.params;
+    let { role } = req.user;
 
     try {
         const jobs = await prisma.job.findUnique({
             where: { id: Number(id) },
-            include: { 
-                materials: true,
-                professional: {
-                    select: {
-                        id: true, email: true, phone: true, fcmToken: true,
-                        profile: { 
-                            select: { 
-                                id: true, 
-                                firstName: true, 
-                                lastName: true, 
-                                avatar: true, 
-                                userId: true,
-                                professional: { 
-                                    select: { 
-                                        id: true,
-                                        intro: true,
-                                        language: true,
-                                        yearsOfExp: true,
-                                        chargeFrom: true,
-                                        available: true,
-                                        // Note: avgRating and numRating will be calculated from Rating model
-                                    } 
-                                },
-                                user: {
-                                    select: {
-                                        location: {
-                                            select: {
-                                                state: true,
-                                                lga: true
-                                            }
-                                        }
-                                    }
-                                }
-                            } 
-                        }
-                    }
-                },
-                client: {
-                    select: { 
-                        id: true, email: true, phone: true, fcmToken: true, 
-                        profile: { select: { id: true, firstName: true, lastName: true, avatar: true } } 
-                    }
-                }
-            }
+            include: jobIncludeForRole(role)
         })
 
-        // Calculate and add ratings for the professional
+        // Calculate and add ratings for the professional (only for clients)
         let jobWithRatings = jobs;
-        if (jobs?.professional?.profile?.userId) {
+        if (role !== UserRole.PROFESSIONAL && jobs?.professional?.profile?.userId) {
             const ratings = await calculateProfessionalRatings(jobs.professional.profile.userId);
             jobWithRatings = {
                 ...jobs,

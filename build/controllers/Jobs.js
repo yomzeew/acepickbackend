@@ -151,7 +151,7 @@ const getLatestJob = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const job = yield prisma_1.default.job.findFirst({
             where: Object.assign(Object.assign({}, whereCondition), { status: enum_1.JobStatus.PENDING, accepted: false }),
             orderBy: { createdAt: 'desc' },
-            include: { materials: true }
+            include: jobIncludeForRole(role)
         });
         if (!job) {
             return (0, modules_1.handleResponse)(res, 404, false, 'No job found');
@@ -166,57 +166,15 @@ exports.getLatestJob = getLatestJob;
 const getJobById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     let { id } = req.params;
+    let { role } = req.user;
     try {
         const jobs = yield prisma_1.default.job.findUnique({
             where: { id: Number(id) },
-            include: {
-                materials: true,
-                professional: {
-                    select: {
-                        id: true, email: true, phone: true, fcmToken: true,
-                        profile: {
-                            select: {
-                                id: true,
-                                firstName: true,
-                                lastName: true,
-                                avatar: true,
-                                userId: true,
-                                professional: {
-                                    select: {
-                                        id: true,
-                                        intro: true,
-                                        language: true,
-                                        yearsOfExp: true,
-                                        chargeFrom: true,
-                                        available: true,
-                                        // Note: avgRating and numRating will be calculated from Rating model
-                                    }
-                                },
-                                user: {
-                                    select: {
-                                        location: {
-                                            select: {
-                                                state: true,
-                                                lga: true
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                client: {
-                    select: {
-                        id: true, email: true, phone: true, fcmToken: true,
-                        profile: { select: { id: true, firstName: true, lastName: true, avatar: true } }
-                    }
-                }
-            }
+            include: jobIncludeForRole(role)
         });
-        // Calculate and add ratings for the professional
+        // Calculate and add ratings for the professional (only for clients)
         let jobWithRatings = jobs;
-        if ((_b = (_a = jobs === null || jobs === void 0 ? void 0 : jobs.professional) === null || _a === void 0 ? void 0 : _a.profile) === null || _b === void 0 ? void 0 : _b.userId) {
+        if (role !== enum_1.UserRole.PROFESSIONAL && ((_b = (_a = jobs === null || jobs === void 0 ? void 0 : jobs.professional) === null || _a === void 0 ? void 0 : _a.profile) === null || _b === void 0 ? void 0 : _b.userId)) {
             const ratings = yield calculateProfessionalRatings(jobs.professional.profile.userId);
             jobWithRatings = Object.assign(Object.assign({}, jobs), { professional: Object.assign(Object.assign({}, jobs.professional), { profile: Object.assign(Object.assign({}, jobs.professional.profile), { professional: Object.assign(Object.assign({}, jobs.professional.profile.professional), { avgRating: ratings.avgRating, numRating: ratings.numRating }) }) }) });
         }
