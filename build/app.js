@@ -17,9 +17,11 @@ const { createServer } = require('http');
 const path_1 = __importDefault(require("path"));
 const prisma_1 = __importDefault(require("./config/prisma"));
 const configSetup_1 = __importDefault(require("./config/configSetup"));
+const redis_1 = __importDefault(require("./config/redis"));
 const cors_1 = __importDefault(require("cors"));
 const logRoutes_1 = require("./middlewares/logRoutes");
 const authorize_1 = require("./middlewares/authorize");
+const rateLimiter_1 = require("./middlewares/rateLimiter");
 const index_1 = __importDefault(require("./routes/index"));
 const auth_1 = __importDefault(require("./routes/auth"));
 const general_1 = __importDefault(require("./routes/general"));
@@ -110,9 +112,21 @@ app.use(logRoutes_1.logRoutes);
 app.get('/', (req, res) => {
     res.status(200).json({ message: 'Hello, world! This API is working!' });
 });
-app.get('/api/health', (req, res) => {
-    res.status(200).json({ status: true, message: 'Server is running' });
-});
+app.get('/api/health', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    let redisStatus = 'not configured';
+    if (redis_1.default) {
+        try {
+            const pong = yield redis_1.default.ping();
+            redisStatus = pong === 'PONG' ? 'connected' : 'error';
+        }
+        catch (_a) {
+            redisStatus = 'disconnected';
+        }
+    }
+    res.status(200).json({ status: true, message: 'Server is running', redis: redisStatus });
+}));
+// Global API rate limiter (100 req/min per IP)
+app.use('/api', rateLimiter_1.apiLimiter);
 // Public routes (no authentication required)
 app.use("/api/public", public_1.default);
 // Authenticated routes

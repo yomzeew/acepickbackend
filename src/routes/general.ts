@@ -31,6 +31,7 @@ import { getClientDashboard, getProfessionalDashboard, getDeliveryDashboard } fr
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, deleteAllNotifications } from "../controllers/notifications";
 import { getTurnCredentials } from "../controllers/turn";
 import { saveCallRecording, getCallRecordings, deleteCallRecording } from "../controllers/callRecording";
+import { getAvailableRoles, switchRole } from "../controllers/switchRole";
 import { paymentLimiter, heavyLimiter } from "../middlewares/rateLimiter";
 
 const routes = Router();
@@ -238,5 +239,9 @@ routes.get('/turn-credentials', getTurnCredentials);
 routes.post('/call-recordings', saveCallRecording);
 routes.get('/call-recordings', getCallRecordings);
 routes.delete('/call-recordings/:id', deleteCallRecording);
+
+// Role switching
+routes.get('/available-roles', getAvailableRoles);
+routes.put('/switch-role', switchRole);
 
 export default routes;

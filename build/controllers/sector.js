@@ -15,11 +15,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteSector = exports.updateSector = exports.createSector = exports.getSectorsMetrics = exports.getSectors = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
+const cache_1 = require("../services/cache");
 const getSectors = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const sectors = yield prisma_1.default.sector.findMany({
-            orderBy: { title: 'asc' },
-        });
+        const sectors = yield cache_1.CacheService.getOrSet('sectors:all', () => __awaiter(void 0, void 0, void 0, function* () {
+            return prisma_1.default.sector.findMany({ orderBy: { title: 'asc' } });
+        }), 600); // 10 min TTL
         return (0, modules_1.successResponse)(res, 'success', sectors);
     }
     catch (error) {

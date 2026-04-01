@@ -322,7 +322,9 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             type: enum_1.NotificationType.ORDER,
             title: 'New Order',
             message: `${(_d = productTransaction.buyer.profile) === null || _d === void 0 ? void 0 : _d.firstName} ordered ${productTransaction.quantity}x ${productTransaction.product.name}. Delivery requested.`,
-            data: { orderId: order.id, productTransactionId },
+            data: { type: 'ORDER', orderId: order.id, productTransactionId },
+            categoryId: 'NEW_ORDER',
+            priority: 'high',
         });
         return (0, modules_1.successResponse)(res, 'success', Object.assign(Object.assign({}, order), { totalCost: Number(order.cost) + Number(productTransaction.price) }));
     }
@@ -583,7 +585,7 @@ const acceptOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 exports.acceptOrder = acceptOrder;
 // ─────────────── Generic rider status transition helper ───────────────
 const riderStatusTransition = (req, res, fromStatus, toStatus, activityType, notifyBuyerTitle, notifyBuyerMsg) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const { id } = req.user;
     const { orderId } = req.params;
     try {
@@ -624,9 +626,19 @@ const riderStatusTransition = (req, res, fromStatus, toStatus, activityType, not
                 data: { orderId: order.id, status: toStatus },
             });
         }
+        // Notify seller
+        if ((_f = order.productTransaction) === null || _f === void 0 ? void 0 : _f.sellerId) {
+            yield notification_1.NotificationService.create({
+                userId: order.productTransaction.sellerId,
+                type: enum_1.NotificationType.ORDER,
+                title: notifyBuyerTitle,
+                message: notifyBuyerMsg(order.id),
+                data: { orderId: order.id, status: toStatus },
+            });
+        }
         // Real-time socket to buyer & seller
         const io = (0, chat_1.getIO)();
-        for (const uid of [(_f = order.productTransaction) === null || _f === void 0 ? void 0 : _f.buyerId, (_g = order.productTransaction) === null || _g === void 0 ? void 0 : _g.sellerId].filter(Boolean)) {
+        for (const uid of [(_g = order.productTransaction) === null || _g === void 0 ? void 0 : _g.buyerId, (_h = order.productTransaction) === null || _h === void 0 ? void 0 : _h.sellerId].filter(Boolean)) {
             const onlineUser = yield prisma_1.default.onlineUser.findFirst({ where: { userId: uid } });
             if (onlineUser === null || onlineUser === void 0 ? void 0 : onlineUser.isOnline) {
                 io.to(onlineUser.socketId).emit(events_1.Emit.DELIVERY_STATUS_UPDATE, {
@@ -955,8 +967,22 @@ const cancelOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         }
         const updatedOrder = yield prisma_1.default.order.update({
             where: { id: order.id },
-            data: { status: enum_1.OrderStatus.CANCELLED }
+            data: { status: enum_1.OrderStatus.CANCELLED },
+            include: { productTransaction: { select: { buyerId: true, sellerId: true } } }
         });
+        // Notify buyer and seller about cancellation
+        if (updatedOrder.productTransaction) {
+            const otherPartyId = updatedOrder.productTransaction.buyerId === id
+                ? updatedOrder.productTransaction.sellerId
+                : updatedOrder.productTransaction.buyerId;
+            yield notification_1.NotificationService.create({
+                userId: otherPartyId,
+                type: enum_1.NotificationType.ORDER,
+                title: 'Order Cancelled',
+                message: `Order #${order.id} has been cancelled.`,
+                data: { orderId: order.id, status: enum_1.OrderStatus.CANCELLED },
+            });
+        }
         return (0, modules_1.successResponse)(res, 'success', updatedOrder);
     }
     catch (error) {
@@ -966,7 +992,7 @@ const cancelOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 });
 exports.cancelOrder = cancelOrder;
 const disputeOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     const { id } = req.user;
     const result = body_1.disputeSchema.safeParse(req.body);
     if (!result.success) {
@@ -1043,6 +1069,14 @@ const disputeOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     });
     const emailMsg = (0, messages_1.disputedOrderEmail)(productTransaction, dispute);
     yield (0, gmail_1.sendEmail)(partner === null || partner === void 0 ? void 0 : partner.email, emailMsg.title, emailMsg.body, ((_b = partner === null || partner === void 0 ? void 0 : partner.profile) === null || _b === void 0 ? void 0 : _b.firstName) || 'User');
+    // Push notification to seller
+    yield notification_1.NotificationService.create({
+        userId: partnerId || productTransaction.sellerId,
+        type: enum_1.NotificationType.ORDER,
+        title: 'Order Disputed',
+        message: `${(_c = reporter === null || reporter === void 0 ? void 0 : reporter.profile) === null || _c === void 0 ? void 0 : _c.firstName} has raised a dispute for order #${productTransaction.id}. Reason: ${reason}`,
+        data: { productTransactionId: productTransaction.id, disputeId: dispute.id },
+    });
     return (0, modules_1.successResponse)(res, 'success', dispute);
 });
 exports.disputeOrder = disputeOrder;
@@ -1074,6 +1108,25 @@ const resolveDispute = (req, res) => __awaiter(void 0, void 0, void 0, function*
     const emailMsg = (0, messages_1.resolveDisputeEmail)(dispute);
     yield (0, gmail_1.sendEmail)(dispute.reporter.email, emailMsg.title, emailMsg.body, 'User');
     yield (0, gmail_1.sendEmail)(dispute.partner.email, emailMsg.title, emailMsg.body, 'User');
+    // Push notification to both parties
+    if (dispute.reporterId) {
+        yield notification_1.NotificationService.create({
+            userId: dispute.reporterId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Dispute Resolved',
+            message: `Your dispute #${dispute.id} has been resolved by admin.`,
+            data: { disputeId: dispute.id },
+        });
+    }
+    if (dispute.partnerId) {
+        yield notification_1.NotificationService.create({
+            userId: dispute.partnerId,
+            type: enum_1.NotificationType.ORDER,
+            title: 'Dispute Resolved',
+            message: `Dispute #${dispute.id} has been resolved by admin.`,
+            data: { disputeId: dispute.id },
+        });
+    }
     return (0, modules_1.successResponse)(res, 'success', updatedDispute);
 });
 exports.resolveDispute = resolveDispute;

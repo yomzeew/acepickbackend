@@ -12,10 +12,10 @@ const createRedisStore = (prefix?: string) => {
     });
 };
 
-// OTP: strict — 3 requests per 5 minutes
+// OTP: strict — 5 requests per 5 minutes
 export const otpLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
-    max: 3,
+    max: 5,
     store: createRedisStore('rl:otp:'),
     message: { success: false, message: "Too many OTP requests. Try again later." },
     standardHeaders: true,

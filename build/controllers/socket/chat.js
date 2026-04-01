@@ -20,6 +20,20 @@ const path_1 = __importDefault(require("path"));
 const cryptography_1 = require("../../utils/cryptography");
 const enum_1 = require("../../utils/enum");
 const notification_1 = require("../../services/notification");
+/** Returns the roles a given user role is allowed to chat with */
+const getAllowedChatRoles = (role) => {
+    switch (role) {
+        case enum_1.UserRole.CLIENT:
+            return [enum_1.UserRole.PROFESSIONAL, enum_1.UserRole.DELIVERY];
+        case enum_1.UserRole.PROFESSIONAL:
+            return [enum_1.UserRole.CLIENT];
+        case enum_1.UserRole.DELIVERY:
+            return [enum_1.UserRole.CLIENT];
+        default:
+            // admins / superadmins can chat with anyone
+            return [enum_1.UserRole.CLIENT, enum_1.UserRole.PROFESSIONAL, enum_1.UserRole.DELIVERY];
+    }
+};
 const supabaseStorage_1 = require("../../services/supabaseStorage");
 const supabase_1 = require("../../config/supabase");
 /** Parse members string — handles both comma-separated and JSON array formats */
@@ -57,7 +71,16 @@ const sendMessage = (io, socket, data) => __awaiter(void 0, void 0, void 0, func
             where: { id: to },
             include: { onlineUser: true }
         });
-        if (otherUser && otherUser.onlineUser && !otherUser.onlineUser.isOnline) {
+        // Enforce chat role restrictions
+        if (otherUser) {
+            const allowedRoles = getAllowedChatRoles(socket.user.role);
+            if (!allowedRoles.includes(otherUser.role)) {
+                console.warn(`Chat blocked: ${socket.user.role} cannot message ${otherUser.role}`);
+                return;
+            }
+        }
+        // Always send push — on mobile the app may be backgrounded while socket is still alive
+        if (otherUser) {
             let user = yield prisma_1.default.user.findFirst({
                 where: { id: senderId },
                 include: { profile: true }
@@ -137,9 +160,11 @@ const getContacts = (io, socket) => __awaiter(void 0, void 0, void 0, function* 
         if (!user) {
             return;
         }
+        const allowedRoles = getAllowedChatRoles(user.role);
         const contacts = yield prisma_1.default.user.findMany({
             where: {
                 NOT: { id: user.id },
+                role: { in: allowedRoles },
             },
             select: {
                 id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
@@ -162,6 +187,15 @@ exports.getContacts = getContacts;
 const joinRoom = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         console.log("join room", data);
+        // Enforce chat role restrictions before joining/creating a room
+        const otherUser = yield prisma_1.default.user.findUnique({ where: { id: data.contactId } });
+        if (otherUser) {
+            const allowedRoles = getAllowedChatRoles(socket.user.role);
+            if (!allowedRoles.includes(otherUser.role)) {
+                console.warn(`Room blocked: ${socket.user.role} cannot chat with ${otherUser.role}`);
+                return;
+            }
+        }
         let room = yield prisma_1.default.chatRoom.findFirst({
             where: {
                 AND: [
@@ -203,14 +237,21 @@ const getMsgs = (io, socket, data) => __awaiter(void 0, void 0, void 0, function
     try {
         const chatroom = yield prisma_1.default.chatRoom.findFirst({
             where: { name: data.room },
-            include: { messages: true }
         });
         if (!chatroom)
             return;
         const members = parseMembers(chatroom.members);
-        // Sort by timestamp ascending so oldest messages come first
-        const sorted = [...chatroom.messages].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        const normalizedMessages = sorted.map((msg) => ({
+        // Build a where clause — if client sends `since` timestamp, only fetch newer messages
+        const messageWhere = { chatroomId: chatroom.id };
+        if (data.since) {
+            messageWhere.timestamp = { gt: new Date(data.since) };
+        }
+        const messages = yield prisma_1.default.message.findMany({
+            where: messageWhere,
+            orderBy: { timestamp: 'asc' },
+            take: 500, // cap to avoid huge payloads
+        });
+        const normalizedMessages = messages.map((msg) => ({
             to: members.filter((member) => member !== msg.from)[0],
             from: msg.from,
             text: (0, cryptography_1.decryptMessage)(msg.text),
@@ -227,6 +268,7 @@ const getMsgs = (io, socket, data) => __awaiter(void 0, void 0, void 0, function
 exports.getMsgs = getMsgs;
 const getPrevChats = (io, socket, data) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const allowedRoles = getAllowedChatRoles(socket.user.role);
         const chatrooms = yield prisma_1.default.chatRoom.findMany({
             where: { members: { contains: socket.user.id } }
         });
@@ -235,7 +277,10 @@ const getPrevChats = (io, socket, data) => __awaiter(void 0, void 0, void 0, fun
             return members.filter((member) => member !== socket.user.id)[0];
         }).filter(Boolean);
         const prevChats = yield prisma_1.default.user.findMany({
-            where: { id: { in: partners } },
+            where: {
+                id: { in: partners },
+                role: { in: allowedRoles },
+            },
             select: {
                 id: true, email: true, phone: true, role: true, fcmToken: true, createdAt: true, updatedAt: true,
                 profile: {

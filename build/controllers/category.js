@@ -15,11 +15,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteCategory = exports.updateCategory = exports.addCategory = exports.getCategories = void 0;
 const prisma_1 = __importDefault(require("../config/prisma"));
 const modules_1 = require("../utils/modules");
+const cache_1 = require("../services/cache");
 const getCategories = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const categories = yield prisma_1.default.category.findMany({
-            orderBy: { name: 'asc' }
-        });
+        const categories = yield cache_1.CacheService.getOrSet('categories:all', () => __awaiter(void 0, void 0, void 0, function* () {
+            return prisma_1.default.category.findMany({ orderBy: { name: 'asc' } });
+        }), 600); // 10 min TTL
         return (0, modules_1.successResponse)(res, 'success', categories);
     }
     catch (error) {
@@ -34,6 +35,7 @@ const addCategory = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             return (0, modules_1.errorResponse)(res, 'error', 'Category name is required');
         }
         const newCategory = yield prisma_1.default.category.create({ data: { name, description } });
+        yield cache_1.CacheService.invalidateCategories();
         return (0, modules_1.successResponse)(res, 'Category added successfully', newCategory);
     }
     catch (error) {
@@ -56,6 +58,7 @@ const updateCategory = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 description: description || category.description,
             }
         });
+        yield cache_1.CacheService.invalidateCategories();
         return (0, modules_1.successResponse)(res, 'Category updated successfully', updated);
     }
     catch (error) {
@@ -71,6 +74,7 @@ const deleteCategory = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return (0, modules_1.errorResponse)(res, 'error', 'Category not found');
         }
         yield prisma_1.default.category.delete({ where: { id: Number(id) } });
+        yield cache_1.CacheService.invalidateCategories();
         return (0, modules_1.successResponse)(res, 'Category deleted successfully');
     }
     catch (error) {

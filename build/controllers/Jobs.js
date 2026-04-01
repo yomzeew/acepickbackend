@@ -28,6 +28,28 @@ const events_1 = require("../utils/events");
 const ledgerService_1 = require("../services/ledgerService");
 const CommissionService_1 = require("../services/CommissionService");
 const jobHook_1 = require("../hooks/jobHook");
+// Helper function to calculate professional ratings
+const calculateProfessionalRatings = (professionalUserId) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const ratings = yield prisma_1.default.rating.findMany({
+            where: { professionalUserId },
+            select: { value: true }
+        });
+        if (ratings.length === 0) {
+            return { avgRating: 0, numRating: 0 };
+        }
+        const totalRating = ratings.reduce((sum, rating) => sum + rating.value, 0);
+        const avgRating = totalRating / ratings.length;
+        return {
+            avgRating: Math.round(avgRating * 10) / 10, // Round to 1 decimal place
+            numRating: ratings.length
+        };
+    }
+    catch (error) {
+        console.error('Error calculating ratings:', error);
+        return { avgRating: 0, numRating: 0 };
+    }
+});
 const testApi = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     return (0, modules_1.successResponse)(res, "success", "Your Api is working!");
 });
@@ -45,7 +67,36 @@ const jobIncludeForRole = (role) => {
         professional: {
             select: {
                 id: true, email: true, phone: true, fcmToken: true,
-                profile: { select: { id: true, firstName: true, lastName: true, avatar: true, professional: { select: { id: true } } } }
+                profile: {
+                    select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        avatar: true,
+                        userId: true,
+                        professional: {
+                            select: {
+                                id: true,
+                                intro: true,
+                                language: true,
+                                yearsOfExp: true,
+                                chargeFrom: true,
+                                available: true,
+                                // Note: avgRating and numRating will be calculated from Rating model
+                            }
+                        },
+                        user: {
+                            select: {
+                                location: {
+                                    select: {
+                                        state: true,
+                                        lga: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         materials: true,
@@ -67,7 +118,16 @@ const getJobs = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             include: jobIncludeForRole(role),
             orderBy: { createdAt: 'desc' }
         });
-        return (0, modules_1.successResponse)(res, "success", jobs);
+        // Calculate and add ratings for each job's professional
+        const jobsWithRatings = yield Promise.all(jobs.map((job) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a, _b;
+            if ((_b = (_a = job.professional) === null || _a === void 0 ? void 0 : _a.profile) === null || _b === void 0 ? void 0 : _b.userId) {
+                const ratings = yield calculateProfessionalRatings(job.professional.profile.userId);
+                return Object.assign(Object.assign({}, job), { professional: Object.assign(Object.assign({}, job.professional), { profile: Object.assign(Object.assign({}, job.professional.profile), { professional: Object.assign(Object.assign({}, job.professional.profile.professional), { avgRating: ratings.avgRating, numRating: ratings.numRating }) }) }) });
+            }
+            return job;
+        })));
+        return (0, modules_1.successResponse)(res, "success", jobsWithRatings);
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, "error", error);
@@ -104,13 +164,63 @@ const getLatestJob = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 });
 exports.getLatestJob = getLatestJob;
 const getJobById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
     let { id } = req.params;
     try {
         const jobs = yield prisma_1.default.job.findUnique({
             where: { id: Number(id) },
-            include: { materials: true }
+            include: {
+                materials: true,
+                professional: {
+                    select: {
+                        id: true, email: true, phone: true, fcmToken: true,
+                        profile: {
+                            select: {
+                                id: true,
+                                firstName: true,
+                                lastName: true,
+                                avatar: true,
+                                userId: true,
+                                professional: {
+                                    select: {
+                                        id: true,
+                                        intro: true,
+                                        language: true,
+                                        yearsOfExp: true,
+                                        chargeFrom: true,
+                                        available: true,
+                                        // Note: avgRating and numRating will be calculated from Rating model
+                                    }
+                                },
+                                user: {
+                                    select: {
+                                        location: {
+                                            select: {
+                                                state: true,
+                                                lga: true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                client: {
+                    select: {
+                        id: true, email: true, phone: true, fcmToken: true,
+                        profile: { select: { id: true, firstName: true, lastName: true, avatar: true } }
+                    }
+                }
+            }
         });
-        return (0, modules_1.successResponse)(res, "success", jobs);
+        // Calculate and add ratings for the professional
+        let jobWithRatings = jobs;
+        if ((_b = (_a = jobs === null || jobs === void 0 ? void 0 : jobs.professional) === null || _a === void 0 ? void 0 : _a.profile) === null || _b === void 0 ? void 0 : _b.userId) {
+            const ratings = yield calculateProfessionalRatings(jobs.professional.profile.userId);
+            jobWithRatings = Object.assign(Object.assign({}, jobs), { professional: Object.assign(Object.assign({}, jobs.professional), { profile: Object.assign(Object.assign({}, jobs.professional.profile), { professional: Object.assign(Object.assign({}, jobs.professional.profile.professional), { avgRating: ratings.avgRating, numRating: ratings.numRating }) }) }) });
+        }
+        return (0, modules_1.successResponse)(res, "success", jobWithRatings);
     }
     catch (error) {
         return (0, modules_1.errorResponse)(res, 'error', error.message);
@@ -183,7 +293,9 @@ const createJobOrder = (req, res) => __awaiter(void 0, void 0, void 0, function*
         type: enum_2.NotificationType.JOB,
         title: 'New Job Request',
         message: `You have a new job request: ${job.title}`,
-        data: { jobId: job.id },
+        data: { type: 'JOB', jobId: job.id },
+        categoryId: 'NEW_JOB',
+        priority: 'high',
     });
     let onlineUser = yield prisma_1.default.onlineUser.findFirst({
         where: { userId: validatedData.professionalId }

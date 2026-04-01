@@ -44,7 +44,11 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             return (0, modules_1.handleResponse)(res, 404, false, "Invalid Credentials");
         const token = (0, helpers_1.generateToken)(user);
         const profile = yield prisma_1.default.profile.findFirst({ where: { userId: user.id } });
-        if (profile) {
+        // Save fcmToken to both User (for push notifications) and Profile
+        if (fcmToken) {
+            yield prisma_1.default.user.update({ where: { id: user.id }, data: { fcmToken } });
+        }
+        if (profile && fcmToken) {
             yield prisma_1.default.profile.update({ where: { id: profile.id }, data: { fcmToken } });
         }
         const userData = yield (0, helpers_1.getUserDataByRole)(user.id, user.role);

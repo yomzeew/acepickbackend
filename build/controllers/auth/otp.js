@@ -39,16 +39,19 @@ const sendOtp = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             yield prisma_1.default.verify.create({
                 data: { contact: email, code: codeEmail, type: enum_1.VerificationType.EMAIL }
             });
-            let messageId;
+            let emailResult;
             if (reason === enum_1.OTPReason.VERIFICATION) {
                 const verifyEmailMsg = (0, messages_1.sendOTPEmail)(codeEmail);
-                messageId = yield (0, gmail_1.sendEmail)(email, verifyEmailMsg.title, verifyEmailMsg.body, 'User');
+                emailResult = yield (0, gmail_1.sendEmail)(email, verifyEmailMsg.title, verifyEmailMsg.body, 'User');
             }
             else if (reason === enum_1.OTPReason.FORGOT_PASSWORD) {
                 const msg = (0, messages_1.forgotPasswordEmail)(codeEmail);
-                messageId = yield (0, gmail_1.sendEmail)(email, msg.title, msg.body, 'User');
+                emailResult = yield (0, gmail_1.sendEmail)(email, msg.title, msg.body, 'User');
             }
-            emailSendStatus = Boolean(messageId);
+            emailSendStatus = (emailResult === null || emailResult === void 0 ? void 0 : emailResult.success) === true;
+            if (!emailSendStatus) {
+                console.error('[OTP] Email send failed:', (emailResult === null || emailResult === void 0 ? void 0 : emailResult.message) || 'Unknown error');
+            }
         }
         if (type === enum_1.VerificationType.SMS || type === enum_1.VerificationType.BOTH) {
             yield prisma_1.default.verify.create({

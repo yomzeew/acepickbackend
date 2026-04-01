@@ -144,7 +144,7 @@ const updateProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 });
 exports.updateProfile = updateProfile;
 const getUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { id } = req.user;
+    const { id, role: userRole } = req.user;
     const result = query_1.getUsersQuerySchema.safeParse(req.query);
     if (!result.success) {
         return res.status(400).json({
@@ -155,9 +155,23 @@ const getUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     }
     console.log(result.data);
     const { search, professionId, page, limit, role } = result.data;
+    // Enforce chat role restrictions:
+    // Client → can see professional + delivery
+    // Professional → can see client only
+    // Delivery → can see client only
+    const allowedRolesMap = {
+        client: ['professional', 'delivery'],
+        professional: ['client'],
+        delivery: ['client'],
+    };
+    const allowedRoles = allowedRolesMap[userRole] || ['client', 'professional', 'delivery'];
+    // If a specific role filter is requested, validate it's in the allowed list
+    const effectiveRole = role
+        ? (allowedRoles.includes(role) ? role : '__none__') // block disallowed role filter
+        : undefined;
     try {
         const contacts = yield prisma_1.default.user.findMany({
-            where: Object.assign(Object.assign(Object.assign({}, (role && { role: role })), { id: { not: id }, profile: search
+            where: Object.assign(Object.assign(Object.assign({}, (effectiveRole ? { role: effectiveRole } : { role: { in: allowedRoles } })), { id: { not: id }, profile: search
                     ? {
                         OR: [
                             { firstName: { contains: search, mode: 'insensitive' } },

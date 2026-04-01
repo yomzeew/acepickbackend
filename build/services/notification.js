@@ -18,17 +18,11 @@ exports.sendBatchPushNotifications = sendBatchPushNotifications;
 const axios_1 = __importDefault(require("axios"));
 const prisma_1 = __importDefault(require("../config/prisma"));
 // ─── Expo Push (low-level) ───────────────────────────────────
-function sendPushNotification(expoPushToken, title, message, data) {
+function sendPushNotification(expoPushToken, title, message, data, options) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
         try {
-            const response = yield axios_1.default.post('https://exp.host/--/api/v2/push/send', {
-                to: expoPushToken,
-                sound: 'default',
-                title,
-                body: message,
-                data,
-            }, {
+            const response = yield axios_1.default.post('https://exp.host/--/api/v2/push/send?useFcmV1=true', Object.assign(Object.assign(Object.assign({ to: expoPushToken, sound: 'default', title, body: message, data }, ((options === null || options === void 0 ? void 0 : options.channelId) && { channelId: options.channelId })), ((options === null || options === void 0 ? void 0 : options.priority) && { priority: options.priority })), ((options === null || options === void 0 ? void 0 : options.categoryId) && { categoryId: options.categoryId })), {
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
@@ -68,7 +62,7 @@ function sendBatchPushNotifications(tokens, title, message, data) {
         }
         for (const chunk of chunks) {
             try {
-                yield axios_1.default.post('https://exp.host/--/api/v2/push/send', chunk, {
+                yield axios_1.default.post('https://exp.host/--/api/v2/push/send?useFcmV1=true', chunk, {
                     headers: {
                         'Accept': 'application/json',
                         'Content-Type': 'application/json',
@@ -88,7 +82,7 @@ exports.NotificationService = {
      */
     create(params) {
         return __awaiter(this, void 0, void 0, function* () {
-            const { userId, type, title, message, data, sendPush = true } = params;
+            const { userId, type, title, message, data, sendPush = true, channelId, priority, categoryId } = params;
             // 1. Store in DB
             const notification = yield prisma_1.default.notification.create({
                 data: {
@@ -108,13 +102,18 @@ exports.NotificationService = {
                         select: { fcmToken: true }
                     });
                     if (user === null || user === void 0 ? void 0 : user.fcmToken) {
-                        const result = yield sendPushNotification(user.fcmToken, title, message, Object.assign({ notificationId: notification.id, type }, data));
+                        console.log(`[push] Sending to user=${userId} token=${user.fcmToken.substring(0, 20)}...`);
+                        const result = yield sendPushNotification(user.fcmToken, title, message, Object.assign({ notificationId: notification.id, type }, data), { channelId, priority, categoryId });
+                        console.log(`[push] Result:`, result);
                         if (result === null || result === void 0 ? void 0 : result.status) {
                             yield prisma_1.default.notification.update({
                                 where: { id: notification.id },
                                 data: { pushSent: true }
                             });
                         }
+                    }
+                    else {
+                        console.warn(`[push] No fcmToken for user=${userId} — push skipped`);
                     }
                 }
                 catch (error) {

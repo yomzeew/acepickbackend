@@ -67,7 +67,7 @@ const getConfig = (): Config => {
         EMAIL_FROM: process.env.EMAIL_FROM,
         EMAIL_PASS: process.env.EMAIL_PASS,
         EMAIL_HOST: process.env.EMAIL_HOST,
-        OTP_EXPIRY_TIME: Number(process.env.OTP_EXPIRY_TIME || 5),
+        OTP_EXPIRY_TIME: Number(process.env.OTP_EXPIRY_TIME || 1), // Reduced to 1 minute (60 seconds)
         TOKEN_SECRET: process.env.TOKEN_SECRET || 'supersecret',
         REDIS_INSTANCE_URL: process.env.REDIS_INSTANCE_URL,
         REDIS_HOST: process.env.REDIS_HOST,

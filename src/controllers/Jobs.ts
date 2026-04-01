@@ -15,6 +15,31 @@ import { LedgerService } from "../services/ledgerService";
 import { CommissionService } from "../services/CommissionService";
 import { onJobStatusUpdate, onJobCreate } from "../hooks/jobHook";
 
+// Helper function to calculate professional ratings
+const calculateProfessionalRatings = async (professionalUserId: string) => {
+    try {
+        const ratings = await prisma.rating.findMany({
+            where: { professionalUserId },
+            select: { value: true }
+        });
+
+        if (ratings.length === 0) {
+            return { avgRating: 0, numRating: 0 };
+        }
+
+        const totalRating = ratings.reduce((sum, rating) => sum + rating.value, 0);
+        const avgRating = totalRating / ratings.length;
+
+        return { 
+            avgRating: Math.round(avgRating * 10) / 10, // Round to 1 decimal place
+            numRating: ratings.length 
+        };
+    } catch (error) {
+        console.error('Error calculating ratings:', error);
+        return { avgRating: 0, numRating: 0 };
+    }
+};
+
 export const testApi = async (req: Request, res: Response) => {
     return successResponse(res, "success", "Your Api is working!")
 }
@@ -32,7 +57,36 @@ const jobIncludeForRole = (role: string) => {
         professional: {
             select: {
                 id: true, email: true, phone: true, fcmToken: true,
-                profile: { select: { id: true, firstName: true, lastName: true, avatar: true, professional: { select: { id: true } } } }
+                profile: { 
+                    select: { 
+                        id: true, 
+                        firstName: true, 
+                        lastName: true, 
+                        avatar: true, 
+                        userId: true,
+                        professional: { 
+                            select: { 
+                                id: true,
+                                intro: true,
+                                language: true,
+                                yearsOfExp: true,
+                                chargeFrom: true,
+                                available: true,
+                                // Note: avgRating and numRating will be calculated from Rating model
+                            } 
+                        },
+                        user: {
+                            select: {
+                                location: {
+                                    select: {
+                                        state: true,
+                                        lga: true
+                                    }
+                                }
+                            }
+                        }
+                    } 
+                }
             }
         },
         materials: true,
@@ -61,7 +115,31 @@ export const getJobs = async (req: Request, res: Response) => {
             orderBy: { createdAt: 'desc' }
         })
 
-        return successResponse(res, "success", jobs)
+        // Calculate and add ratings for each job's professional
+        const jobsWithRatings = await Promise.all(
+            jobs.map(async (job) => {
+                if (job.professional?.profile?.userId) {
+                    const ratings = await calculateProfessionalRatings(job.professional.profile.userId);
+                    return {
+                        ...job,
+                        professional: {
+                            ...job.professional,
+                            profile: {
+                                ...job.professional.profile,
+                                professional: {
+                                    ...job.professional.profile.professional,
+                                    avgRating: ratings.avgRating,
+                                    numRating: ratings.numRating
+                                } as any
+                            }
+                        }
+                    };
+                }
+                return job;
+            })
+        );
+
+        return successResponse(res, "success", jobsWithRatings)
     } catch (error) {
         return errorResponse(res, "error", error)
     }
@@ -111,10 +189,73 @@ export const getJobById = async (req: Request, res: Response) => {
     try {
         const jobs = await prisma.job.findUnique({
             where: { id: Number(id) },
-            include: { materials: true }
+            include: { 
+                materials: true,
+                professional: {
+                    select: {
+                        id: true, email: true, phone: true, fcmToken: true,
+                        profile: { 
+                            select: { 
+                                id: true, 
+                                firstName: true, 
+                                lastName: true, 
+                                avatar: true, 
+                                userId: true,
+                                professional: { 
+                                    select: { 
+                                        id: true,
+                                        intro: true,
+                                        language: true,
+                                        yearsOfExp: true,
+                                        chargeFrom: true,
+                                        available: true,
+                                        // Note: avgRating and numRating will be calculated from Rating model
+                                    } 
+                                },
+                                user: {
+                                    select: {
+                                        location: {
+                                            select: {
+                                                state: true,
+                                                lga: true
+                                            }
+                                        }
+                                    }
+                                }
+                            } 
+                        }
+                    }
+                },
+                client: {
+                    select: { 
+                        id: true, email: true, phone: true, fcmToken: true, 
+                        profile: { select: { id: true, firstName: true, lastName: true, avatar: true } } 
+                    }
+                }
+            }
         })
 
-        return successResponse(res, "success", jobs)
+        // Calculate and add ratings for the professional
+        let jobWithRatings = jobs;
+        if (jobs?.professional?.profile?.userId) {
+            const ratings = await calculateProfessionalRatings(jobs.professional.profile.userId);
+            jobWithRatings = {
+                ...jobs,
+                professional: {
+                    ...jobs.professional,
+                    profile: {
+                        ...jobs.professional.profile,
+                        professional: {
+                            ...jobs.professional.profile.professional,
+                            avgRating: ratings.avgRating,
+                            numRating: ratings.numRating
+                        } as any
+                    }
+                }
+            };
+        }
+
+        return successResponse(res, "success", jobWithRatings)
     } catch (error: any) {
         return errorResponse(res, 'error', error.message);
     }

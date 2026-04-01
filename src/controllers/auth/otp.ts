@@ -32,17 +32,20 @@ export const sendOtp = async (req: Request, res: Response) => {
                 data: { contact: email!, code: codeEmail, type: VerificationType.EMAIL as any }
             })
 
-            let messageId;
+            let emailResult;
 
             if (reason === OTPReason.VERIFICATION) {
                 const verifyEmailMsg = sendOTPEmail(codeEmail);
-                messageId = await sendEmail(email as string, verifyEmailMsg.title, verifyEmailMsg.body, 'User');
+                emailResult = await sendEmail(email as string, verifyEmailMsg.title, verifyEmailMsg.body, 'User');
             } else if (reason === OTPReason.FORGOT_PASSWORD) {
                 const msg = forgotPasswordEmail(codeEmail);
-                messageId = await sendEmail(email as string, msg.title, msg.body, 'User');
+                emailResult = await sendEmail(email as string, msg.title, msg.body, 'User');
             }
 
-            emailSendStatus = Boolean(messageId);
+            emailSendStatus = emailResult?.success === true;
+            if (!emailSendStatus) {
+                console.error('[OTP] Email send failed:', emailResult?.message || 'Unknown error');
+            }
         }
 
         if (type === VerificationType.SMS || type === VerificationType.BOTH) {
