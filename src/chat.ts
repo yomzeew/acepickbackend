@@ -15,12 +15,52 @@ let io: Server;
 
 const RING_TIMEOUT_MS = 60_000; // 1 minute
 
-// Track ringing calls: key = callerId, value = { timeout, receiverId, callType }
-interface RingingCall { timeout: NodeJS.Timeout; receiverId: string; callType: 'voice' | 'video'; }
+// Track ringing calls: key = callerId, value = { timeout, receiverId, callType, deviceId }
+interface RingingCall { 
+  timeout: NodeJS.Timeout; 
+  receiverId: string; 
+  callType: 'voice' | 'video';
+  deviceId?: string;
+}
 const ringingCalls = new Map<string, RingingCall>();
+
+// Track active calls by user and device: key = userId, value = Map<deviceId, socketId>
+const activeCallsByUser = new Map<string, Map<string, string>>();
 
 const findOnlinePartner = async (userId: string) => {
     return prisma.onlineUser.findFirst({ where: { userId, isOnline: true } });
+};
+
+/** Register a device for a user when they connect */
+const registerDevice = (userId: string, deviceId: string, socketId: string) => {
+    if (!activeCallsByUser.has(userId)) {
+        activeCallsByUser.set(userId, new Map());
+    }
+    activeCallsByUser.get(userId)!.set(deviceId, socketId);
+    console.log(`[device-register] User ${userId} device ${deviceId} socket ${socketId}`);
+};
+
+/** Unregister a device when they disconnect */
+const unregisterDevice = (userId: string, deviceId: string) => {
+    const userDevices = activeCallsByUser.get(userId);
+    if (userDevices) {
+        userDevices.delete(deviceId);
+        if (userDevices.size === 0) {
+            activeCallsByUser.delete(userId);
+        }
+    }
+    console.log(`[device-unregister] User ${userId} device ${deviceId}`);
+};
+
+/** Get all active devices for a user */
+const getUserDevices = (userId: string): Map<string, string> | null => {
+    return activeCallsByUser.get(userId) || null;
+};
+
+/** Find specific device socket for a user */
+const findUserDevice = (userId: string, deviceId: string): string | null => {
+    const userDevices = activeCallsByUser.get(userId);
+    return userDevices?.get(deviceId) || null;
 };
 
 /** Find or create a chat room between two users and save a missed call message */
@@ -155,43 +195,81 @@ export const initSocket = (httpServer: any) => {
     io.on(Listen.CONNECTION, async (socket) => {
         await onConnect(socket)
 
+        // Register device if device ID is available
+        const userId = (socket as any).user?.id;
+        const deviceId = (socket as any).deviceId;
+        
+        if (userId && deviceId) {
+            registerDevice(userId, deviceId, socket.id);
+        }
+
         socket.emit(Emit.CONNECTED, socket.id)
 
         socket.on('call-user', async (data: any) => {
             try {
-                console.log(`[call-user] from=${socket.user.id} to=${data.to}`);
+                console.log(`[call-user] from=${socket.user.id} device=${socket.deviceId} to=${data.to}`);
                 if (!data.to || typeof data.to !== 'string' || data.to.length === 0) {
                     console.log(`[call-user] REJECTED: invalid data.to = ${JSON.stringify(data.to)}`);
                     socket.emit('call-unavailable', { to: data.to, reason: 'Invalid recipient' });
                     return;
                 }
+                
+                const callerId = socket.user.id;
+                const callerDeviceId = socket.deviceId;
                 const partner = await findOnlinePartner(data.to);
+                
                 console.log(`[call-user] findOnlinePartner result:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : null);
+                
                 // Always send push — app may be backgrounded while socket is still alive
-                const caller = await prisma.user.findFirst({ where: { id: socket.user.id }, include: { profile: true } });
+                const caller = await prisma.user.findFirst({ where: { id: callerId }, include: { profile: true } });
                 const callerName = `${caller?.profile?.firstName} ${caller?.profile?.lastName}`;
+
+                // Start ring timeout with device tracking
+                startRingTimeout(callerId, data.to, 'voice');
+
+                // Send push notification
                 await NotificationService.create({
                     userId: data.to,
                     type: NotificationType.CHAT,
-                    title: `${callerName} is calling you`,
-                    message: 'Incoming voice call',
-                    data: { type: 'call', callType: 'voice', callerId: socket.user.id, callerName },
-                    channelId: 'calls',
-                    priority: 'high',
-                    categoryId: 'INCOMING_CALL',
+                    title: 'Incoming Voice Call',
+                    message: `${callerName} is calling you`,
+                    data: { callerId, callType: 'voice', deviceId: callerDeviceId }
                 });
 
                 if (partner) {
-                    io.to(partner.socketId).emit('call-made', {
-                        offer: data.offer,
-                        from: socket.user.id,
-                    });
-                    // Start 60s ring timeout
-                    startRingTimeout(socket.user.id, data.to, 'voice');
+                    // Route to specific device or all devices if no device specified
+                    const targetDeviceId = data.targetDeviceId;
+                    let targetSocketId: string | null = null;
+                    
+                    if (targetDeviceId) {
+                        // Route to specific device
+                        targetSocketId = findUserDevice(data.to, targetDeviceId);
+                        console.log(`[call-user] Routing to specific device ${targetDeviceId}:`, targetSocketId);
+                    } else {
+                        // Route to first available device
+                        const userDevices = getUserDevices(data.to);
+                        if (userDevices && userDevices.size > 0) {
+                            targetSocketId = userDevices.values().next().value;
+                            console.log(`[call-user] Routing to first available device:`, targetSocketId);
+                        }
+                    }
+                    
+                    if (targetSocketId) {
+                        io.to(targetSocketId).emit('call-made', {
+                            offer: data.offer,
+                            from: callerId,
+                            deviceId: callerDeviceId,
+                        });
+                        console.log(`[call-user] Voice call routed to socket ${targetSocketId}`);
+                    } else {
+                        console.log(`[call-user] No active device found for user ${data.to}`);
+                        socket.emit('call-unavailable', { to: data.to, reason: 'User offline' });
+                    }
                 } else {
-                    socket.emit('call-unavailable', { to: data.to });
-                    // User offline — save missed call immediately
-                    await saveMissedCallMessage(socket.user.id, data.to, 'voice');
+                    console.log(`[call-user] Partner ${data.to} not online`);
+                    socket.emit('call-unavailable', { to: data.to, reason: 'User offline' });
+                    // Save missed call to chat
+                    await saveMissedCallMessage(callerId, data.to, 'voice');
                 }
             } catch (error) {
                 console.error('call-user error:', error);

@@ -42,15 +42,20 @@ export const isAuthorized = async (req: Request, res: Response, next: NextFuncti
 
 export const socketAuthorize = async (socket: Socket, next: (err?: ExtendedError) => void) => {
     const token = socket.handshake.auth?.token;
+    const deviceId = socket.handshake.auth?.deviceId;
 
     if (!token) {
         return next(new Error('Unauthorized'));
     }
 
     try {
-        const decoded = verify(token, config.TOKEN_SECRET);
+        const decoded = verify(token, config.TOKEN_SECRET) as any;
         (socket as any).user = decoded;
-
+        
+        // Store device ID on socket for tracking
+        (socket as any).deviceId = deviceId;
+        
+        console.log(`[socket-auth] User ${decoded.id} connected with device ${deviceId}`);
         next();
     } catch (error) {
         next(new Error('Unauthorized'));
