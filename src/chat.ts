@@ -38,6 +38,7 @@ const registerDevice = (userId: string, deviceId: string, socketId: string) => {
     }
     activeCallsByUser.get(userId)!.set(deviceId, socketId);
     console.log(`[device-register] User ${userId} device ${deviceId} socket ${socketId}`);
+    console.log(`[device-register] User ${userId} now has ${activeCallsByUser.get(userId)!.size} devices`);
 };
 
 /** Unregister a device when they disconnect */
@@ -199,8 +200,12 @@ export const initSocket = (httpServer: any) => {
         const userId = (socket as any).user?.id;
         const deviceId = (socket as any).deviceId;
         
+        console.log(`[socket-connect] User ${userId} device ${deviceId} socket ${socket.id}`);
+        
         if (userId && deviceId) {
             registerDevice(userId, deviceId, socket.id);
+        } else {
+            console.log(`[socket-connect] Missing device registration - userId: ${!!userId}, deviceId: ${!!deviceId}`);
         }
 
         socket.emit(Emit.CONNECTED, socket.id)
@@ -216,9 +221,14 @@ export const initSocket = (httpServer: any) => {
                 
                 const callerId = socket.user.id;
                 const callerDeviceId = socket.deviceId;
-                const partner = await findOnlinePartner(data.to);
                 
-                console.log(`[call-user] findOnlinePartner result:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : null);
+                // Check device map FIRST (most current state)
+                const userDevices = getUserDevices(data.to);
+                console.log(`[call-user] Device map for user ${data.to}:`, userDevices ? `Found ${userDevices.size} devices` : 'No devices found');
+                
+                // Fallback to database if device map is empty
+                const partner = await findOnlinePartner(data.to);
+                console.log(`[call-user] Database lookup for user ${data.to}:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : 'Not found');
                 
                 // Always send push — app may be backgrounded while socket is still alive
                 const caller = await prisma.user.findFirst({ where: { id: callerId }, include: { profile: true } });
@@ -236,37 +246,31 @@ export const initSocket = (httpServer: any) => {
                     data: { callerId, callType: 'voice', deviceId: callerDeviceId }
                 });
 
-                if (partner) {
-                    // Route to specific device or all devices if no device specified
-                    const targetDeviceId = data.targetDeviceId;
-                    let targetSocketId: string | null = null;
-                    
-                    if (targetDeviceId) {
-                        // Route to specific device
-                        targetSocketId = findUserDevice(data.to, targetDeviceId);
-                        console.log(`[call-user] Routing to specific device ${targetDeviceId}:`, targetSocketId);
-                    } else {
-                        // Route to first available device
-                        const userDevices = getUserDevices(data.to);
-                        if (userDevices && userDevices.size > 0) {
-                            targetSocketId = userDevices.values().next().value;
-                            console.log(`[call-user] Routing to first available device:`, targetSocketId);
-                        }
-                    }
-                    
-                    if (targetSocketId) {
-                        io.to(targetSocketId).emit('call-made', {
-                            offer: data.offer,
-                            from: callerId,
-                            deviceId: callerDeviceId,
-                        });
-                        console.log(`[call-user] Voice call routed to socket ${targetSocketId}`);
-                    } else {
-                        console.log(`[call-user] No active device found for user ${data.to}`);
-                        socket.emit('call-unavailable', { to: data.to, reason: 'User offline' });
-                    }
+                // Try device map first, then database fallback
+                let targetSocketId: string | null = null;
+                let foundVia = '';
+                
+                if (userDevices && userDevices.size > 0) {
+                    // Route to first available device from device map
+                    targetSocketId = userDevices.values().next().value;
+                    foundVia = 'device-map';
+                    console.log(`[call-user] Found via device map, socket: ${targetSocketId}`);
+                } else if (partner) {
+                    // Fallback to database socket
+                    targetSocketId = partner.socketId;
+                    foundVia = 'database';
+                    console.log(`[call-user] Found via database, socket: ${targetSocketId}`);
+                }
+                
+                if (targetSocketId) {
+                    io.to(targetSocketId).emit('call-made', {
+                        offer: data.offer,
+                        from: callerId,
+                        deviceId: callerDeviceId,
+                    });
+                    console.log(`[call-user] Voice call routed via ${foundVia} to socket ${targetSocketId}`);
                 } else {
-                    console.log(`[call-user] Partner ${data.to} not online`);
+                    console.log(`[call-user] No active device found for user ${data.to} via device map or database`);
                     socket.emit('call-unavailable', { to: data.to, reason: 'User offline' });
                     // Save missed call to chat
                     await saveMissedCallMessage(callerId, data.to, 'voice');
@@ -282,12 +286,39 @@ export const initSocket = (httpServer: any) => {
                 if (!data.to) return;
                 // Call answered — clear the ring timeout
                 clearRingTimeout(data.to);
-                const partner = await findOnlinePartner(data.to);
-                if (!partner) return;
-                io.to(partner.socketId).emit('answer-made', {
-                    answer: data.answer,
-                    from: socket.user.id,
-                });
+
+                // Try device map first (most current socket)
+                const callerDevices = getUserDevices(data.to);
+                const targetDeviceId = data.deviceId;
+                let targetSocketId: string | null = null;
+
+                if (targetDeviceId && callerDevices) {
+                    targetSocketId = callerDevices.get(targetDeviceId) || null;
+                    console.log(`[make-answer] Routing to specific device ${targetDeviceId}:`, targetSocketId);
+                }
+                
+                if (!targetSocketId && callerDevices && callerDevices.size > 0) {
+                    targetSocketId = callerDevices.values().next().value;
+                    console.log(`[make-answer] Routing to first available device:`, targetSocketId);
+                }
+
+                // Fallback to DB if device map is empty (reconnect edge case)
+                if (!targetSocketId) {
+                    const partner = await findOnlinePartner(data.to);
+                    targetSocketId = partner?.socketId || null;
+                    console.log(`[make-answer] Fallback to DB socket:`, targetSocketId);
+                }
+
+                if (targetSocketId) {
+                    io.to(targetSocketId).emit('answer-made', {
+                        answer: data.answer,
+                        to: socket.user.id,
+                        deviceId: socket.deviceId,
+                    });
+                    console.log(`[make-answer] Answer routed to socket ${targetSocketId}`);
+                } else {
+                    console.log(`[make-answer] No active device found for user ${data.to}`);
+                }
             } catch (error) {
                 console.error('make-answer error:', error);
             }
@@ -347,39 +378,70 @@ export const initSocket = (httpServer: any) => {
 
         socket.on('video-call-user', async (data: any) => {
             try {
-                console.log(`[video-call-user] from=${socket.user.id} to=${data.to}`);
+                console.log(`[video-call-user] from=${socket.user.id} device=${socket.deviceId} to=${data.to}`);
                 if (!data.to || typeof data.to !== 'string' || data.to.length === 0) {
                     console.log(`[video-call-user] REJECTED: invalid data.to = ${JSON.stringify(data.to)}`);
                     socket.emit('call-unavailable', { to: data.to, reason: 'Invalid recipient' });
                     return;
                 }
+                
+                const callerId = socket.user.id;
+                const callerDeviceId = socket.deviceId;
+                
+                // Check device map FIRST (most current state)
+                const userDevices = getUserDevices(data.to);
+                console.log(`[video-call-user] Device map for user ${data.to}:`, userDevices ? `Found ${userDevices.size} devices` : 'No devices found');
+                
+                // Fallback to database if device map is empty
                 const partner = await findOnlinePartner(data.to);
-                console.log(`[video-call-user] findOnlinePartner result:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : null);
+                console.log(`[video-call-user] Database lookup for user ${data.to}:`, partner ? { socketId: partner.socketId, isOnline: partner.isOnline } : 'Not found');
+                
                 // Always send push — app may be backgrounded while socket is still alive
-                const videoCaller = await prisma.user.findFirst({ where: { id: socket.user.id }, include: { profile: true } });
+                const videoCaller = await prisma.user.findFirst({ where: { id: callerId }, include: { profile: true } });
                 const videoCallerName = `${videoCaller?.profile?.firstName} ${videoCaller?.profile?.lastName}`;
+                
+                // Start ring timeout with device tracking
+                startRingTimeout(callerId, data.to, 'video');
+                
                 await NotificationService.create({
                     userId: data.to,
                     type: NotificationType.CHAT,
-                    title: `${videoCallerName} is video calling you`,
-                    message: 'Incoming video call',
-                    data: { type: 'call', callType: 'video', callerId: socket.user.id, callerName: videoCallerName },
+                    title: 'Incoming Video Call',
+                    message: `${videoCallerName} is video calling you`,
+                    data: { type: 'call', callType: 'video', callerId, callerName: videoCallerName, deviceId: callerDeviceId },
                     channelId: 'calls',
                     priority: 'high',
                     categoryId: 'INCOMING_CALL',
                 });
 
-                if (partner) {
-                    io.to(partner.socketId).emit('video-call-made', {
+                // Try device map first, then database fallback
+                let targetSocketId: string | null = null;
+                let foundVia = '';
+                
+                if (userDevices && userDevices.size > 0) {
+                    // Route to first available device from device map
+                    targetSocketId = userDevices.values().next().value;
+                    foundVia = 'device-map';
+                    console.log(`[video-call-user] Found via device map, socket: ${targetSocketId}`);
+                } else if (partner) {
+                    // Fallback to database socket
+                    targetSocketId = partner.socketId;
+                    foundVia = 'database';
+                    console.log(`[video-call-user] Found via database, socket: ${targetSocketId}`);
+                }
+                
+                if (targetSocketId) {
+                    io.to(targetSocketId).emit('video-call-made', {
                         offer: data.offer,
-                        from: socket.user.id,
+                        from: callerId,
+                        deviceId: callerDeviceId,
                     });
-                    // Start 60s ring timeout
-                    startRingTimeout(socket.user.id, data.to, 'video');
+                    console.log(`[video-call-user] Video call routed via ${foundVia} to socket ${targetSocketId}`);
                 } else {
-                    socket.emit('call-unavailable', { to: data.to });
-                    // User offline — save missed call immediately
-                    await saveMissedCallMessage(socket.user.id, data.to, 'video');
+                    console.log(`[video-call-user] No active device found for user ${data.to} via device map or database`);
+                    socket.emit('call-unavailable', { to: data.to, reason: 'User offline' });
+                    // Save missed call to chat
+                    await saveMissedCallMessage(callerId, data.to, 'video');
                 }
             } catch (error) {
                 console.error('video-call-user error:', error);
@@ -392,12 +454,39 @@ export const initSocket = (httpServer: any) => {
                 if (!data.to) return;
                 // Video call answered — clear the ring timeout
                 clearRingTimeout(data.to);
-                const partner = await findOnlinePartner(data.to);
-                if (!partner) return;
-                io.to(partner.socketId).emit('video-answer-made', {
-                    answer: data.answer,
-                    from: socket.user.id,
-                });
+
+                // Try device map first (most current socket)
+                const callerDevices = getUserDevices(data.to);
+                const targetDeviceId = data.deviceId;
+                let targetSocketId: string | null = null;
+
+                if (targetDeviceId && callerDevices) {
+                    targetSocketId = callerDevices.get(targetDeviceId) || null;
+                    console.log(`[video-make-answer] Routing to specific device ${targetDeviceId}:`, targetSocketId);
+                }
+                
+                if (!targetSocketId && callerDevices && callerDevices.size > 0) {
+                    targetSocketId = callerDevices.values().next().value;
+                    console.log(`[video-make-answer] Routing to first available device:`, targetSocketId);
+                }
+
+                // Fallback to DB if device map is empty (reconnect edge case)
+                if (!targetSocketId) {
+                    const partner = await findOnlinePartner(data.to);
+                    targetSocketId = partner?.socketId || null;
+                    console.log(`[video-make-answer] Fallback to DB socket:`, targetSocketId);
+                }
+
+                if (targetSocketId) {
+                    io.to(targetSocketId).emit('video-answer-made', {
+                        answer: data.answer,
+                        to: socket.user.id,
+                        deviceId: socket.deviceId,
+                    });
+                    console.log(`[video-make-answer] Video answer routed to socket ${targetSocketId}`);
+                } else {
+                    console.log(`[video-make-answer] No active device found for user ${data.to}`);
+                }
             } catch (error) {
                 console.error('video-make-answer error:', error);
             }
