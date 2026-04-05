@@ -24,6 +24,20 @@ interface RingingCall {
 }
 const ringingCalls = new Map<string, RingingCall>();
 
+// Track active calls with start time: key = "callerId-receiverId", value = { startTime, callType }
+interface ActiveCall {
+  startTime: number;
+  callType: 'voice' | 'video';
+  callerId: string;
+  receiverId: string;
+}
+const activeCalls = new Map<string, ActiveCall>();
+
+// Helper to create call key
+const getCallKey = (userId1: string, userId2: string) => {
+  return [userId1, userId2].sort().join('-');
+};
+
 // Track active calls by user and device: key = userId, value = Map<deviceId, socketId>
 const activeCallsByUser = new Map<string, Map<string, string>>();
 
@@ -110,6 +124,55 @@ const saveMissedCallMessage = async (callerId: string, receiverId: string, callT
         console.log(`[missed-call] ${callType} call from ${callerId} to ${receiverId} saved to room ${room.name}`);
     } catch (error) {
         console.error('[missed-call] Error saving missed call message:', error);
+    }
+};
+
+/** Save a completed call with duration to chat history */
+const saveCompletedCallMessage = async (callerId: string, receiverId: string, callType: 'voice' | 'video', durationSeconds: number) => {
+    try {
+        // Find existing chat room
+        let room = await prisma.chatRoom.findFirst({
+            where: {
+                AND: [
+                    { members: { contains: callerId } },
+                    { members: { contains: receiverId } }
+                ]
+            }
+        });
+
+        // Create room if it doesn't exist
+        if (!room) {
+            room = await prisma.chatRoom.create({
+                data: {
+                    name: randomId(12),
+                    members: `${callerId},${receiverId}`
+                }
+            });
+        }
+
+        const msgText = `<completedcall>${callType}:${durationSeconds}`;
+
+        const message = await prisma.message.create({
+            data: {
+                text: encryptMessage(msgText),
+                from: callerId,
+                timestamp: new Date(),
+                chatroomId: room.id
+            }
+        });
+
+        // Emit to room so both parties see it in real-time
+        io.to(room.name).emit(Emit.RECV_MSG, {
+            from: callerId,
+            to: receiverId,
+            text: msgText,
+            room: room.name,
+            timestamp: message.timestamp,
+        });
+
+        console.log(`[completed-call] ${callType} call from ${callerId} to ${receiverId} with duration ${durationSeconds}s saved to room ${room.name}`);
+    } catch (error) {
+        console.error('[completed-call] Error saving completed call message:', error);
     }
 };
 
@@ -287,6 +350,16 @@ export const initSocket = (httpServer: any) => {
                 // Call answered — clear the ring timeout
                 clearRingTimeout(data.to);
 
+                // Track call start time
+                const callKey = getCallKey(socket.user.id, data.to);
+                activeCalls.set(callKey, {
+                    startTime: Date.now(),
+                    callType: 'voice',
+                    callerId: data.to,
+                    receiverId: socket.user.id
+                });
+                console.log(`[call-started] Voice call between ${data.to} and ${socket.user.id}`);
+
                 // Try device map first (most current socket)
                 const callerDevices = getUserDevices(data.to);
                 const targetDeviceId = data.deviceId;
@@ -341,15 +414,31 @@ export const initSocket = (httpServer: any) => {
         socket.on('end-call', async (data: any) => {
             try {
                 if (!data.to) return;
-                // Check if call was never answered (still ringing) — save missed call
-                const ringing = ringingCalls.get(socket.user.id);
-                if (ringing && ringing.receiverId === data.to) {
-                    clearRingTimeout(socket.user.id);
-                    await saveMissedCallMessage(socket.user.id, data.to, 'voice');
+                
+                // Calculate call duration if call was active
+                const callKey = getCallKey(socket.user.id, data.to);
+                const activeCall = activeCalls.get(callKey);
+                
+                if (activeCall) {
+                    // Call was answered and is now ending - save with duration
+                    const durationSeconds = Math.floor((Date.now() - activeCall.startTime) / 1000);
+                    activeCalls.delete(callKey);
+                    
+                    // Save completed call with duration
+                    await saveCompletedCallMessage(socket.user.id, data.to, 'voice', durationSeconds);
+                    console.log(`[call-ended] Voice call between ${socket.user.id} and ${data.to} lasted ${durationSeconds}s`);
                 } else {
-                    clearRingTimeout(socket.user.id);
-                    clearRingTimeout(data.to);
+                    // Check if call was never answered (still ringing) — save missed call
+                    const ringing = ringingCalls.get(socket.user.id);
+                    if (ringing && ringing.receiverId === data.to) {
+                        clearRingTimeout(socket.user.id);
+                        await saveMissedCallMessage(socket.user.id, data.to, 'voice');
+                    } else {
+                        clearRingTimeout(socket.user.id);
+                        clearRingTimeout(data.to);
+                    }
                 }
+                
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('call-ended', {
@@ -373,6 +462,23 @@ export const initSocket = (httpServer: any) => {
                 });
             } catch (error) {
                 console.error('reject-call error:', error);
+            }
+        });
+
+        socket.on('call-busy', async (data: any) => {
+            try {
+                if (!data.to) return;
+                console.log(`[call-busy] User ${socket.user.id} is busy, rejecting call from ${data.to}`);
+                // Clear timeout for the incoming caller
+                clearRingTimeout(data.to);
+                // Notify the caller that the user is busy
+                const partner = await findOnlinePartner(data.to);
+                if (!partner) return;
+                io.to(partner.socketId).emit('call-busy', {
+                    from: socket.user.id,
+                });
+            } catch (error) {
+                console.error('call-busy error:', error);
             }
         });
 
@@ -455,6 +561,16 @@ export const initSocket = (httpServer: any) => {
                 // Video call answered — clear the ring timeout
                 clearRingTimeout(data.to);
 
+                // Track video call start time
+                const callKey = getCallKey(socket.user.id, data.to);
+                activeCalls.set(callKey, {
+                    startTime: Date.now(),
+                    callType: 'video',
+                    callerId: data.to,
+                    receiverId: socket.user.id
+                });
+                console.log(`[video-call-started] Video call between ${data.to} and ${socket.user.id}`);
+
                 // Try device map first (most current socket)
                 const callerDevices = getUserDevices(data.to);
                 const targetDeviceId = data.deviceId;
@@ -509,15 +625,31 @@ export const initSocket = (httpServer: any) => {
         socket.on('video-end-call', async (data: any) => {
             try {
                 if (!data.to) return;
-                // Check if video call was never answered — save missed call
-                const ringing = ringingCalls.get(socket.user.id);
-                if (ringing && ringing.receiverId === data.to) {
-                    clearRingTimeout(socket.user.id);
-                    await saveMissedCallMessage(socket.user.id, data.to, 'video');
+                
+                // Calculate video call duration if call was active
+                const callKey = getCallKey(socket.user.id, data.to);
+                const activeCall = activeCalls.get(callKey);
+                
+                if (activeCall) {
+                    // Call was answered and is now ending - save with duration
+                    const durationSeconds = Math.floor((Date.now() - activeCall.startTime) / 1000);
+                    activeCalls.delete(callKey);
+                    
+                    // Save completed video call with duration
+                    await saveCompletedCallMessage(socket.user.id, data.to, 'video', durationSeconds);
+                    console.log(`[video-call-ended] Video call between ${socket.user.id} and ${data.to} lasted ${durationSeconds}s`);
                 } else {
-                    clearRingTimeout(socket.user.id);
-                    clearRingTimeout(data.to);
+                    // Check if video call was never answered — save missed call
+                    const ringing = ringingCalls.get(socket.user.id);
+                    if (ringing && ringing.receiverId === data.to) {
+                        clearRingTimeout(socket.user.id);
+                        await saveMissedCallMessage(socket.user.id, data.to, 'video');
+                    } else {
+                        clearRingTimeout(socket.user.id);
+                        clearRingTimeout(data.to);
+                    }
                 }
+                
                 const partner = await findOnlinePartner(data.to);
                 if (!partner) return;
                 io.to(partner.socketId).emit('video-call-ended', {
@@ -541,6 +673,23 @@ export const initSocket = (httpServer: any) => {
                 });
             } catch (error) {
                 console.error('video-reject-call error:', error);
+            }
+        });
+
+        socket.on('video-call-busy', async (data: any) => {
+            try {
+                if (!data.to) return;
+                console.log(`[video-call-busy] User ${socket.user.id} is busy, rejecting video call from ${data.to}`);
+                // Clear timeout for the incoming caller
+                clearRingTimeout(data.to);
+                // Notify the caller that the user is busy
+                const partner = await findOnlinePartner(data.to);
+                if (!partner) return;
+                io.to(partner.socketId).emit('video-call-busy', {
+                    from: socket.user.id,
+                });
+            } catch (error) {
+                console.error('video-call-busy error:', error);
             }
         });
 
